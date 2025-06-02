@@ -19,7 +19,3 @@ valveprotos.workspace = true
 [features]
 deadlock = ["valveprotos/deadlock"]
 dota2 = ["valveprotos/dota2"]
-# TODO(blukai): rename preserve-metadata feature into something more meaningful,
-# or get rid of it all together and preserve symbols only in debug builds.
-preserve-metadata = []
-protobuf-src = ["valveprotos/protobuf-src"]

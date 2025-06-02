@@ -201,8 +201,6 @@ impl DeltaHeader {
 
 #[derive(Debug, Clone)]
 struct EntityField {
-    #[cfg(feature = "preserve-metadata")]
-    path: FieldPath,
     value: FieldValue,
 }
 
@@ -264,11 +262,7 @@ impl Entity {
                         oe.get_mut().value = field_value;
                     }
                     Entry::Vacant(ve) => {
-                        ve.insert(EntityField {
-                            #[cfg(feature = "preserve-metadata")]
-                            path: fp.clone(),
-                            value: field_value,
-                        });
+                        ve.insert(EntityField { value: field_value });
                     }
                 }
             }
@@ -319,11 +313,6 @@ impl Entity {
                     .map_err(GetValueError::from)
             },
         )
-    }
-
-    #[cfg(feature = "preserve-metadata")]
-    pub fn get_path(&self, key: &u64) -> Option<&FieldPath> {
-        self.fields.get(key).map(|ef| &ef.path)
     }
 
     pub fn serializer(&self) -> &FlattenedSerializer {

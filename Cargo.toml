@@ -1,35 +1,29 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/*",
-  "tools/*"
+    "crates/*",
 ]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 
 [workspace.dependencies]
 # internal
-haste = { path = "." }
 haste_broadcast = { path = "crates/haste_broadcast", default-features = false }
 haste_core = { path = "crates/haste_core" }
 haste_vartype = { path = "crates/haste_vartype" }
 # external
 anyhow = "1.0.86"
-argh = "0.1.12"
 bytes = "1.7.2"
 dungers = { git = "https://github.com/blukai/dungers.git", rev = "5419784ef771089369bdce5463a6cf6da35d3a79" }
 dyn-clone = "1.0.17"
-env_logger = "0.11.5"
 expect-test = "1.5.0"
 hashbrown = { version = "0.14.5", default-features = false }
 http = "1.1.0"
 lazy_static = "1.5.0"
 log = "0.4.22"
 nohash = "0.2.0"
-pollster = "0.3.0"
 prost = "0.13.3"
-rand = "0.8.5"
 reqwest = { version = "0.12.8", default-features = false }
 serde = "1.0.210"
 serde_json = "1.0.128"
@@ -48,41 +42,5 @@ version = "0.0.0"
 edition.workspace = true
 
 [dependencies]
-haste_broadcast = { workspace = true, optional = true }
+haste_broadcast.workspace = true
 haste_core.workspace = true
-
-[dev-dependencies]
-anyhow.workspace = true
-rand.workspace = true
-
-[features]
-broadcast = ["haste_broadcast/reqwest", "haste_broadcast/tokio"]
-deadlock = ["haste_core/deadlock"]
-dota2 = ["haste_core/dota2"]
-# TODO(blukai): rename preserve-metadata feature into something more meaningful,
-# or get rid of it all together and preserve symbols only in debug builds.
-preserve-metadata = ["haste_core/preserve-metadata"]
-protobuf-src = ["haste_core/protobuf-src"]
-
-[[example]]
-name = "deadlock-gametime"
-
-[[example]]
-name = "deadlock-position"
-required-features = ["deadlock"]
-
-[[example]]
-name = "dota2-allchat"
-required-features = ["dota2"]
-
-[[example]]
-name = "messagehandler-experiment"
-required-features = ["deadlock"]
-
-[[example]]
-name = "lifestate"
-required-features = ["preserve-metadata"]
-
-[[example]]
-name = "seek"
-

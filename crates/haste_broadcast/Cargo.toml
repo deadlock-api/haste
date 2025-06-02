@@ -9,19 +9,10 @@ bytes.workspace = true
 haste_core.workspace = true
 http.workspace = true
 log.workspace = true
-pollster.workspace = true
 prost.workspace = true
-reqwest = { workspace = true, features = ["gzip"], optional = true }
+reqwest = { workspace = true, features = ["gzip"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["time", "sync"], optional = true }
+tokio = { workspace = true, features = ["time", "sync"] }
 valveprotos.workspace = true
-
-[features]
-default = ["reqwest", "tokio"]
-# "standard" http client
-reqwest = ["dep:reqwest", "tokio"]
-# reqwest is built on top of hyper, hyper needs tokio; also tokio also provides
-# async-friendly sleep function
-tokio = ["dep:tokio"] 

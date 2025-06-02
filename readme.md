@@ -25,13 +25,13 @@ bevy game engine).
 notable examples to check out for detailed usage:
 
 - [deadlock-position](examples/deadlock-position.rs) demonstrates how to work with
-entities and how to get player (or any other entity, if desired) positions in
-deadlock (the game);
+  entities and how to get player (or any other entity, if desired) positions in
+  deadlock (the game);
 - [deadlock-gametime](examples/deadlock-gametime.rs) also demonstrates how to work
-with entities and how to compute game time (not a very straightforward thing to
-do, thanks valve).
+  with entities and how to compute game time (not a very straightforward thing to
+  do, thanks valve).
 - [dota2-allchat](examples/dota2-allchat.rs) shows how to work with packet
-messages.
+  messages.
 
 to run these examples navigate to haste directory and run
 
@@ -41,11 +41,10 @@ $ cargo run --example <example-name> -- <path-to-dem-file>
 
 ### usage
 
-to use haste in your project, you'll need either:
- - `protoc` (protocol buffer compiler) in your `$PATH`, or `$PROTOC` environment
- variable needs point to it
- - or `cmake` (if you don't have `protoc`, it will be compiled for you) and
- `protobuf-src` feature flag enabled
+to use haste in your project, you'll need :
+
+- `protoc` (protocol buffer compiler) in your `$PATH`, or `$PROTOC` environment
+  variable needs point to it
 
 haste is not published to [crates.io](https://crates.io/) (yet?). you can add it
 to your `Cargo.toml` as a [git
@@ -65,9 +64,6 @@ tools) to explore all the entities that are present in replays.
 - `broadcast`: enables http broadcasts.
 - `deadlock`: enables deadlock protos and some utilities.
 - `dota2`: enabled dota2 protos and some utilities.
-- `protobuf-src`: enables
-[protobuf_src](https://docs.rs/protobuf-src/latest/protobuf_src/) crate which
-builds `protoc`.
 
 ## benchmarks
 
@@ -77,9 +73,9 @@ to tease a bit.. as of 25-09-2024 in standard release build with no extra
 optimizations nor non-stadard memory allocators:
 
 - 31 minutes deadlock match can be parsed in ~660 ms with ~17.5 mb peak memory
-consumtion;
+  consumtion;
 - 38 minutes dota 2 captains mode match - in ~650 ms with ~18 mb peak memory
-consumtion.
+  consumtion.
 
 run time is an average from 10 runs with no warmups. peak memory consumtion is
 `time`'s `maximum resident set size` stat.
@@ -106,7 +102,7 @@ other notable resources:
 - [ValveSoftware/source-sdk-2013](https://github.com/ValveSoftware/source-sdk-2013)
 - [SwagSoftware/Kisak-Strike](https://github.com/SwagSoftware/Kisak-Strike)
 - [markus-wa/demoinfocs-golang](https://github.com/markus-wa/demoinfocs-golang)
-(some info about how pointer serializer fields work)
+  (some info about how pointer serializer fields work)
 - [demofile-net](https://github.com/saul/demofile-net) (tv broadcasts)
 
 ## performance / profiling
