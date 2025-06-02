@@ -3,11 +3,11 @@ use std::hash::BuildHasherDefault;
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 
+use crate::bitreader::BitReader;
 use hashbrown::HashMap;
 use nohash::NoHashHasher;
-use valveprotos::common::{c_demo_string_tables, CDemoStringTables};
-
-use crate::bitreader::BitReader;
+use valveprotos::common::c_demo_string_tables::TableT;
+use valveprotos::common::CDemoStringTables;
 
 // NOTE: some info about string tables is available at
 // https://developer.valvesoftware.com/wiki/Networking_Events_%26_Messages#String_Tables
@@ -246,7 +246,7 @@ impl StringTable {
         Ok(())
     }
 
-    pub fn do_full_update(&mut self, table: &c_demo_string_tables::TableT) {
+    pub fn do_full_update(&mut self, table: &TableT) {
         debug_assert!(
             self.name.as_ref().eq(table.table_name()),
             "trying to do a full update on the wrong table"

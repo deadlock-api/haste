@@ -317,10 +317,7 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
                 }
 
                 let sleep_dur = fetch_after.duration_since(Instant::now());
-                #[cfg(feature = "tokio")]
                 tokio::time::sleep(sleep_dur).await;
-                #[cfg(not(feature = "tokio"))]
-                compile_error!("AAAAGH! can't sleep");
             }
 
             let start = Instant::now();

@@ -168,12 +168,6 @@ fn visit_ident(
             special_descriptor: Some(FieldSpecialDescriptor::DynamicSerializerArray),
             decoder: Box::<U64Decoder>::default(),
         }),
-        // https://github.com/SteamDatabase/GameTracking-CS2/blob/6b3bf6ad44266e3ee4440a0b9b2fee1268812840/game/core/tools/demoinfo2/demoinfo2.txt#L155C83-L155C111
-        "DOTA_CombatLogQueryProgress" => Ok(FieldMetadata {
-            special_descriptor: Some(FieldSpecialDescriptor::DynamicSerializerArray),
-            decoder: Box::<U64Decoder>::default(),
-        }),
-
         // default
         _ => Ok(FieldMetadata {
             special_descriptor: None,

@@ -57,9 +57,6 @@ pub fn ehandle_to_index(handle: u32) -> i32 {
 // NOTE(blukai): can converting index and serial to handle (what CBaseHandle::Init (in
 // public/basehandle.h) does) be somehow somewhere useful?:
 // m_Index = iEntry | (iSerialNumber << NUM_SERIAL_NUM_SHIFT_BITS);
-
-// NOTE: rust want that coord_from_cell is never used, but that is because there are no default
-// features that indicate otherwise (both deadlock and dota2 features are not active by default).
 #[allow(dead_code)]
 /// given a cell and an offset in that cell, reconstruct the world coord.
 ///
@@ -72,7 +69,6 @@ fn coord_from_cell(cell_width: u32, max_coord: u32, cell: u16, vec: f32) -> f32 
     r
 }
 
-#[cfg(feature = "deadlock")]
 mod deadlock {
     // in replay that i'm fiddling with (3843940_683350910.dem) CBodyComponent.m_vecY of
     // CCitadelPlayerPawn #4 at tick 111,077 is 1022.78125 and CBodyComponent.m_cellY is 36;
@@ -114,31 +110,13 @@ mod deadlock {
     // TODO(blukai): impl compact / low precision (u8) variant of coord_from_cell
 }
 
-#[cfg(feature = "deadlock")]
 pub use deadlock::coord_from_cell as deadlock_coord_from_cell;
-
-#[cfg(feature = "dota2")]
-mod dota2 {
-    // TODO: validate that dota 2 coord resolution is correct. i just know that cells in dota are
-    // 256 x 256 thus i set cell bits to 7.
-    const CELL_BASEENTITY_ORIGIN_CELL_BITS: u32 = 7;
-    const CELL_WIDTH: u32 = 1 << CELL_BASEENTITY_ORIGIN_CELL_BITS;
-    const MAX_COORD_INTEGER: u32 = 16384;
-
-    /// given a cell and an offset in that cell, reconstruct the world coord.
-    pub fn coord_from_cell(cell: u16, vec: f32) -> f32 {
-        super::coord_from_cell(CELL_WIDTH, MAX_COORD_INTEGER, cell, vec)
-    }
-}
-
-#[cfg(feature = "dota2")]
-pub use dota2::coord_from_cell as dota2_coord_from_cell;
 
 /// generates field key from given path. can and recommended to be called from a const context.
 /// when called from a const context, the function is interpreted by the compiler at compile time
 /// meaning that there's no const of generating key for given path at runtime.
 pub const fn fkey_from_path(path: &[&str]) -> u64 {
-    assert!(path.len() > 0, "invalid path");
+    assert!(!path.is_empty(), "invalid path");
 
     let seed = fxhash::hash_bytes(path[0].as_bytes());
     let mut hash = seed;
@@ -354,7 +332,6 @@ impl EntityContainer {
     pub(crate) fn new() -> Self {
         Self {
             entities: HashMap::with_capacity_and_hasher(
-                // NOTE(blukai): in dota this value can be actually higher.
                 MAX_EDICTS as usize,
                 BuildHasherDefault::default(),
             ),

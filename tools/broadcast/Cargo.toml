@@ -7,6 +7,6 @@ edition.workspace = true
 anyhow.workspace = true
 argh.workspace = true
 env_logger.workspace = true
-haste = { workspace = true, features = ["broadcast"] }
+haste.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

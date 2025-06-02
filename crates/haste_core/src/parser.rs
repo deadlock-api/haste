@@ -26,7 +26,7 @@ use crate::stringtables::StringTableContainer;
 const DEFAULT_FULL_PACKET_INTERVAL: i32 = 1800;
 // NOTE: tick interval is needed to be able to correctly decide simulation time values.
 // dota2's tick interval is 1 / 30; deadlock's 1 / 60 - they are constant.
-const DEFAULT_TICK_INTERVAL: f32 = 1.0 / 30.0;
+const DEFAULT_TICK_INTERVAL: f32 = 1.0 / 60.0;
 
 // NOTE: primary purpose of Context is to to be able to expose state to the
 // public; attempts to put parser into arguments of Visitor's method did not

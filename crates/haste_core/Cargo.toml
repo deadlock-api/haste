@@ -15,7 +15,3 @@ prost.workspace = true
 snap.workspace = true
 thiserror.workspace = true
 valveprotos.workspace = true
-
-[features]
-deadlock = ["valveprotos/deadlock"]
-dota2 = ["valveprotos/dota2"]

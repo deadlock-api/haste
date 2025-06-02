@@ -515,8 +515,6 @@ impl QAngleDecoder {
                 }
 
                 hash if hash == fxhash::hash_bytes(b"qangle") => {}
-                // NOTE(blukai): naming of var encoders seem inconsistent. found this pascal cased
-                // name in dota 2 replay from 2018.
                 hash if hash == fxhash::hash_bytes(b"QAngle") => {}
 
                 _ => unimplemented!("{:?}", var_encoder),

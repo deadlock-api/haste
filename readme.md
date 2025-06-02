@@ -20,25 +20,6 @@ bevy game engine).
 
 ## how to
 
-### examples
-
-notable examples to check out for detailed usage:
-
-- [deadlock-position](examples/deadlock-position.rs) demonstrates how to work with
-  entities and how to get player (or any other entity, if desired) positions in
-  deadlock (the game);
-- [deadlock-gametime](examples/deadlock-gametime.rs) also demonstrates how to work
-  with entities and how to compute game time (not a very straightforward thing to
-  do, thanks valve).
-- [dota2-allchat](examples/dota2-allchat.rs) shows how to work with packet
-  messages.
-
-to run these examples navigate to haste directory and run
-
-```console
-$ cargo run --example <example-name> -- <path-to-dem-file>
-```
-
 ### usage
 
 to use haste in your project, you'll need :
@@ -62,8 +43,6 @@ tools) to explore all the entities that are present in replays.
 ## feature flags
 
 - `broadcast`: enables http broadcasts.
-- `deadlock`: enables deadlock protos and some utilities.
-- `dota2`: enabled dota2 protos and some utilities.
 
 ## benchmarks
 
@@ -74,8 +53,6 @@ optimizations nor non-stadard memory allocators:
 
 - 31 minutes deadlock match can be parsed in ~660 ms with ~17.5 mb peak memory
   consumtion;
-- 38 minutes dota 2 captains mode match - in ~650 ms with ~18 mb peak memory
-  consumtion.
 
 run time is an average from 10 runs with no warmups. peak memory consumtion is
 `time`'s `maximum resident set size` stat.
