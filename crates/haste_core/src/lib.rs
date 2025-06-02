@@ -55,15 +55,6 @@ pub use valveprotos;
 
 // TODO: figure out combat log
 
-// NOTE: preserve-metadata feature is enabled in haste_dota2_atoms_codegen
-// crate, but it's disabled everywhere else. command `cargo build --release
-// --bin emptybench` produces a release build in which this feature is enabled,
-// this is wrong, see https://github.com/rust-lang/cargo/issues/4463 for more
-// details. fortunately the "workardound" is simple -
-// `CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p emptybench`. the
-// difference is that instead of specifying which binary to build the project is
-// being specified.
-
 // TODO(blukai): figure out a more efficient representation for entity state. hashbrown is fast,
 // but that stuff can be faster. this probably will also change how entity field lookups need to be
 // performed.

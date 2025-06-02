@@ -36,9 +36,6 @@ pub enum FlattenedSerializersError {
 #[derive(Debug, Clone, Default)]
 pub struct Symbol {
     pub hash: u64,
-    // TODO: consider renaming str into boxed_str
-    #[cfg(feature = "preserve-metadata")]
-    pub str: Box<str>,
 }
 
 impl From<&String> for Symbol {
@@ -46,8 +43,6 @@ impl From<&String> for Symbol {
     fn from(value: &String) -> Self {
         Self {
             hash: fxhash::hash_bytes(value.as_bytes()),
-            #[cfg(feature = "preserve-metadata")]
-            str: value.clone().into_boxed_str(),
         }
     }
 }

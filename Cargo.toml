@@ -55,7 +55,3 @@ haste_core.workspace = true
 broadcast = ["haste_broadcast/reqwest", "haste_broadcast/tokio"]
 deadlock = ["haste_core/deadlock"]
 dota2 = ["haste_core/dota2"]
-# TODO(blukai): rename preserve-metadata feature into something more meaningful,
-# or get rid of it all together and preserve symbols only in debug builds.
-preserve-metadata = ["haste_core/preserve-metadata"]
-protobuf-src = ["haste_core/protobuf-src"]
