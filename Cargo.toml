@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/*",
-  "tools/*",
+    "crates/*",
+    "tools/*",
 ]
 
 [workspace.package]
@@ -51,10 +51,6 @@ edition.workspace = true
 haste_broadcast = { workspace = true, optional = true }
 haste_core.workspace = true
 
-[dev-dependencies]
-anyhow.workspace = true
-rand.workspace = true
-
 [features]
 broadcast = ["haste_broadcast/reqwest", "haste_broadcast/tokio"]
 deadlock = ["haste_core/deadlock"]
@@ -63,25 +59,3 @@ dota2 = ["haste_core/dota2"]
 # or get rid of it all together and preserve symbols only in debug builds.
 preserve-metadata = ["haste_core/preserve-metadata"]
 protobuf-src = ["haste_core/protobuf-src"]
-
-[[example]]
-name = "deadlock-gametime"
-
-[[example]]
-name = "deadlock-position"
-required-features = ["deadlock"]
-
-[[example]]
-name = "dota2-allchat"
-required-features = ["dota2"]
-
-[[example]]
-name = "messagehandler-experiment"
-required-features = ["deadlock"]
-
-[[example]]
-name = "lifestate"
-required-features = ["preserve-metadata"]
-
-[[example]]
-name = "seek"
