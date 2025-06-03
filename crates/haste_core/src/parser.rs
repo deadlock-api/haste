@@ -7,15 +7,53 @@ use valveprotos::common::{
     CsvcMsgPacketEntities, CsvcMsgServerInfo, CsvcMsgUpdateStringTable, EDemoCommands, SvcMessages,
 };
 
-use crate::bitreader::BitReader;
+use crate::bitreader::{BitReader, BitReaderError, BitReaderOverflowError};
 use crate::demofile::{DemoHeaderError, DEMO_RECORD_BUFFER_SIZE};
-use crate::demostream::{CmdHeader, DemoStream};
-use crate::entities::{DeltaHeader, Entity, EntityContainer};
+use crate::demostream::{CmdHeader, DecodeCmdError, DemoStream, ReadCmdError, ReadCmdHeaderError};
+use crate::entities::{DeltaHeader, Entity, EntityContainer, EntityError};
 use crate::entityclasses::EntityClasses;
 use crate::fielddecoder::FieldDecodeContext;
-use crate::flattenedserializers::FlattenedSerializerContainer;
+use crate::flattenedserializers::{FlattenedSerializerContainer, FlattenedSerializersError};
 use crate::instancebaseline::{InstanceBaseline, INSTANCE_BASELINE_TABLE_NAME};
 use crate::stringtables::StringTableContainer;
+
+#[derive(thiserror::Error, Debug)]
+pub enum ParseError {
+    #[error(transparent)]
+    DemoHeaderError(#[from] DemoHeaderError),
+    #[error(transparent)]
+    BitReaderOverflowError(#[from] BitReaderOverflowError),
+    #[error(transparent)]
+    FlattenedSerializersError(#[from] FlattenedSerializersError),
+    #[error(transparent)]
+    EntityError(#[from] EntityError),
+    #[error(transparent)]
+    AnyhowError(#[from] anyhow::Error),
+    #[error("entity classes not initialized")]
+    EntityClassesNotInitialized,
+    #[error("serializers not initialized")]
+    SerializersNotInitialized,
+    #[error("string table with id {table_id} not found")]
+    StringTableNotFound { table_id: i32 },
+    #[error("entity with index {index} not found after operation")]
+    EntityNotFoundAfterOperation { index: i32 },
+    #[error("parse integer error")]
+    ParseInt(#[from] std::num::ParseIntError),
+    #[error("snap error")]
+    Snap(#[from] snap::Error),
+    #[error("decode protobuf error")]
+    DecodeProtobuf(#[from] prost::DecodeError),
+    #[error("decode command error")]
+    DecodeCmd(#[from] DecodeCmdError),
+    #[error("read command error")]
+    ReadCmd(#[from] ReadCmdError),
+    #[error("read command header error")]
+    ReadCmdHeader(#[from] ReadCmdHeaderError),
+    #[error("io error")]
+    Io(#[from] io::Error),
+    #[error("bit reader error")]
+    BitReader(#[from] BitReaderError),
+}
 
 // as can be observed when dumping commands. also as specified in clarity
 // (src/main/java/skadistats/clarity/model/engine/AbstractDotaEngineType.java)
@@ -167,9 +205,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
     // recorded).
     //
     // must be publicly exposed for this to be actually useful.
-    fn run<F>(&mut self, mut handler: F) -> Result<()>
+    fn run<F>(&mut self, mut handler: F) -> Result<(), ParseError>
     where
-        F: FnMut(&mut Self, &CmdHeader) -> Result<ControlFlow>,
+        F: FnMut(&mut Self, &CmdHeader) -> Result<ControlFlow, ParseError>,
     {
         loop {
             match self.demo_stream.read_cmd_header() {
@@ -202,13 +240,13 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         }
     }
 
-    pub fn run_to_end(&mut self) -> Result<()> {
+    pub fn run_to_end(&mut self) -> Result<(), ParseError> {
         self.run(|_notnotself, _cmd_header| Ok(ControlFlow::HandleCmd))
     }
 
     fn reset(&mut self) -> Result<(), io::Error> {
         self.demo_stream
-            .seek(SeekFrom::Start(self.demo_stream.start_position()))?;
+            .seek(SeekFrom::Start(self.demo_stream.start_position()?))?;
 
         self.ctx.entities.clear();
         self.ctx.string_tables.clear();
@@ -219,7 +257,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         Ok(())
     }
 
-    pub fn run_to_tick(&mut self, target_tick: i32) -> Result<()> {
+    pub fn run_to_tick(&mut self, target_tick: i32) -> Result<(), ParseError> {
         // TODO: do not allow tick to be less then -1
 
         // TODO: do not allow tick to be greater then total ticks
@@ -291,7 +329,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
     // 1. DemSignonPacket (SvcCreateStringTable)
     // 2. DemSendTables (flattened serializers; never update)
     // 3. DemClassInfo (never update)
-    fn handle_cmd(&mut self, cmd_header: &CmdHeader) -> Result<()> {
+    fn handle_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), ParseError> {
         // TODO: consider introducing CmdInstance thing that would allow to decode body once and
         // not read it, but skip, if unconsumed. note that to work temporary ownership of
         // demo_stream will need to be taken.
@@ -335,9 +373,12 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                     .string_tables
                     .find_table(INSTANCE_BASELINE_TABLE_NAME)
                 {
-                    // SAFETY: entity_classes value was assigned above ^.
-                    let entity_classes =
-                        unsafe { self.ctx.entity_classes.as_ref().unwrap_unchecked() };
+                    // entity_classes was just assigned above, so it's guaranteed to be Some
+                    let entity_classes = self
+                        .ctx
+                        .entity_classes
+                        .as_ref()
+                        .ok_or(ParseError::EntityClassesNotInitialized)?;
                     self.ctx
                         .instance_baseline
                         .update(string_table, entity_classes.classes)?;
@@ -352,16 +393,16 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         Ok(())
     }
 
-    fn handle_cmd_packet(&mut self, cmd: CDemoPacket) -> Result<()> {
+    fn handle_cmd_packet(&mut self, cmd: CDemoPacket) -> Result<(), ParseError> {
         let data = cmd.data.unwrap_or_default();
         let mut br = BitReader::new(&data);
 
         while br.num_bits_left() > 8 {
-            let command = br.read_ubitvar();
-            let size = br.read_uvarint32() as usize;
+            let command = br.read_ubitvar()?;
+            let size = br.read_uvarint32()? as usize;
 
             let buf = &mut self.buf[..size];
-            br.read_bytes(buf);
+            br.read_bytes(buf)?;
             let buf: &_ = buf;
 
             self.visitor.on_packet(&self.ctx, command, buf)?;
@@ -402,11 +443,13 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             }
         }
 
-        br.is_overflowed()?;
         Ok(())
     }
 
-    fn handle_svc_create_string_table(&mut self, msg: CsvcMsgCreateStringTable) -> Result<()> {
+    fn handle_svc_create_string_table(
+        &mut self,
+        msg: CsvcMsgCreateStringTable,
+    ) -> Result<(), ParseError> {
         let string_table = self.ctx.string_tables.create_string_table_mut(
             msg.name(),
             msg.user_data_fixed_size(),
@@ -427,7 +470,6 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 
         let mut br = BitReader::new(string_data);
         string_table.parse_update(&mut br, msg.num_entries())?;
-        br.is_overflowed()?;
 
         if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME) {
             if let Some(entity_classes) = self.ctx.entity_classes.as_ref() {
@@ -440,7 +482,10 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         Ok(())
     }
 
-    fn handle_svc_update_string_table(&mut self, msg: CsvcMsgUpdateStringTable) -> Result<()> {
+    fn handle_svc_update_string_table(
+        &mut self,
+        msg: CsvcMsgUpdateStringTable,
+    ) -> Result<(), ParseError> {
         debug_assert!(msg.table_id.is_some(), "invalid table id");
         let table_id = msg.table_id() as usize;
 
@@ -448,16 +493,15 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             self.ctx.string_tables.has_table(table_id),
             "tryting to update non-existent table"
         );
-        let string_table = unsafe {
-            self.ctx
-                .string_tables
-                .get_table_mut(table_id)
-                .unwrap_unchecked()
-        };
+        // table_id was validated by has_table() check above
+        let string_table = self.ctx.string_tables.get_table_mut(table_id).ok_or(
+            ParseError::StringTableNotFound {
+                table_id: table_id as i32,
+            },
+        )?;
 
         let mut br = BitReader::new(msg.string_data());
         string_table.parse_update(&mut br, msg.num_changed_entries())?;
-        br.is_overflowed()?;
 
         if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME) {
             if let Some(entity_classes) = self.ctx.entity_classes.as_ref() {
@@ -472,12 +516,18 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 
     // NOTE: handle_msg_packet_entities is partially based on
     // ReadPacketEntities in engine/client.cpp
-    fn handle_svc_packet_entities(&mut self, msg: CsvcMsgPacketEntities) -> Result<()> {
-        // SAFETY: safety here can only be guaranteed by the fact that entity
-        // classes and flattened serializers become available before packet
-        // entities.
-        let entity_classes = unsafe { self.ctx.entity_classes.as_ref().unwrap_unchecked() };
-        let serializers = unsafe { self.ctx.serializers.as_ref().unwrap_unchecked() };
+    fn handle_svc_packet_entities(&mut self, msg: CsvcMsgPacketEntities) -> Result<(), ParseError> {
+        // Entity classes and flattened serializers must be available before packet entities
+        let entity_classes = self
+            .ctx
+            .entity_classes
+            .as_ref()
+            .ok_or(ParseError::EntityClassesNotInitialized)?;
+        let serializers = self
+            .ctx
+            .serializers
+            .as_ref()
+            .ok_or(ParseError::SerializersNotInitialized)?;
         let instance_baseline = &self.ctx.instance_baseline;
 
         let entity_data = msg.entity_data();
@@ -488,13 +538,14 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             // TODO(blukai): maybe try to make naming consistent with valve; see
             // https://github.com/taylorfinnell/csgo-demoinfo/blob/74960c07c387b080a0965c4fc33d69ccf9bfe6c8/demoinfogo/demofiledump.cpp#L1153C18-L1153C29
             // and CL_ParseDeltaHeader in engine/client.cpp
-            entity_index += br.read_ubitvar() as i32 + 1;
+            entity_index += br.read_ubitvar()? as i32 + 1;
 
-            let delta_header = DeltaHeader::from_bit_reader(&mut br);
+            let delta_header = DeltaHeader::from_bit_reader(&mut br)?;
             match delta_header {
                 DeltaHeader::CREATE => {
-                    let entity = unsafe {
-                        let entity = self.ctx.entities.handle_create(
+                    // Create the entity and get its index for later retrieval
+                    let created_entity_index = {
+                        self.ctx.entities.handle_create(
                             entity_index,
                             &mut self.field_decode_ctx,
                             &mut br,
@@ -502,48 +553,59 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                             instance_baseline,
                             serializers,
                         )?;
-                        // SAFETY: borrow checker is not happy because handle_create requires
-                        // mutable access to entities; rust's borrowing rules specify that you
-                        // cannot have both mutable and immutable refs to the same data at the same
-                        // time.
-                        //
-                        // alternative would be to call .handle_create and then .get, but that does
-                        // not make any sense, that is redundant because .get is called inside of
-                        // .handle_create. i can't think of any issues that may arrise because of
-                        // my raw pointer approach.
-                        &*(entity as *const Entity)
+                        entity_index
                     };
+
+                    // Now safely get the entity we just created
+                    let entity = self.ctx.entities.get(&created_entity_index).ok_or(
+                        ParseError::EntityNotFoundAfterOperation {
+                            index: created_entity_index,
+                        },
+                    )?;
                     self.visitor.on_entity(&self.ctx, delta_header, entity)?;
                 }
                 DeltaHeader::DELETE => {
-                    let entity = unsafe { self.ctx.entities.handle_delete_unchecked(entity_index) };
+                    let entity = self
+                        .ctx
+                        .entities
+                        .handle_delete(entity_index)
+                        .map_err(|e| anyhow::anyhow!("Failed to delete entity: {}", e))?;
                     self.visitor.on_entity(&self.ctx, delta_header, &entity)?;
                 }
                 DeltaHeader::UPDATE => {
-                    let entity = unsafe {
-                        let entity = self.ctx.entities.handle_update_unchecked(
-                            entity_index,
-                            &mut self.field_decode_ctx,
-                            &mut br,
-                        )?;
-                        // SAFETY: see comment above (below .handle_create call); same stuff.
-                        &*(entity as *const Entity)
+                    // Update the entity and get its index for later retrieval
+                    let updated_entity_index = {
+                        self.ctx
+                            .entities
+                            .handle_update(entity_index, &mut self.field_decode_ctx, &mut br)
+                            .map_err(|e| anyhow::anyhow!("Failed to update entity: {}", e))?;
+                        entity_index
                     };
+
+                    // Now safely get the entity we just updated
+                    let entity = self.ctx.entities.get(&updated_entity_index).ok_or(
+                        ParseError::EntityNotFoundAfterOperation {
+                            index: updated_entity_index,
+                        },
+                    )?;
                     self.visitor.on_entity(&self.ctx, delta_header, entity)?;
                 }
                 _ => {}
             }
         }
 
-        br.is_overflowed()?;
         Ok(())
     }
 
-    fn handle_cmd_string_tables(&mut self, cmd: CDemoStringTables) -> Result<()> {
+    fn handle_cmd_string_tables(&mut self, cmd: CDemoStringTables) -> Result<(), ParseError> {
         self.ctx.string_tables.do_full_update(cmd);
 
-        // SAFETY: entity_classes value is expected to be already assigned
-        let entity_classes = unsafe { self.ctx.entity_classes.as_ref().unwrap_unchecked() };
+        // entity_classes is expected to be already assigned
+        let entity_classes = self
+            .ctx
+            .entity_classes
+            .as_ref()
+            .ok_or(ParseError::EntityClassesNotInitialized)?;
         if let Some(string_table) = self
             .ctx
             .string_tables

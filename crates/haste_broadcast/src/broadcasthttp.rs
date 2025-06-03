@@ -108,7 +108,7 @@ pub struct SyncResponse {
 }
 
 #[derive(Debug)]
-pub enum FragmentType {
+enum FragmentType {
     Delta,
     Full,
 }
@@ -389,11 +389,9 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
                         );
                     }
                     StreamBuffer::Seekable(ref mut cursor) => {
-                        cursor
-                            .write_all(packet.as_ref())
-                            // TODO: this should not panic. probably it's fine. there are very few
-                            // things that could go wrong with Vec<u8> in rust.
-                            .expect("could not buffer");
+                        if cursor.write_all(packet.as_ref()).is_err() {
+                            return None;
+                        }
                         // invalidate last tick so that it can be re-scanned if needed.
                         self.total_ticks = None;
                     }
@@ -417,21 +415,6 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
 // ----
 // demo stream
 
-// NOTE: interacting with stream (read/seek) that has not packets is a developer error, it's is
-// okay to panic.
-macro_rules! no_packet_panic {
-    () => {
-        panic!("attempted reading on BroadcastHttp with no packets")
-    };
-}
-
-// NOTE: this is a developer error, it's is okay to panic.
-macro_rules! not_seekable_panic {
-    () => {
-        panic!("attempted invoking seek-related operation on BroadcastHttp constructed not with `start_streaming_and_buffer`")
-    };
-}
-
 impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> {
     // stream ops
     // ----
@@ -440,7 +423,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     /// delegated to [`std::io::Cursor`].
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
         match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Last(_) => Err(io::Error::other("not seekable")),
             StreamBuffer::Seekable(ref mut c) => c.seek(pos),
         }
     }
@@ -448,7 +431,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
     fn stream_position(&mut self) -> Result<u64, io::Error> {
         match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Last(_) => Err(io::Error::other("not seekable")),
             StreamBuffer::Seekable(ref mut c) => Ok(c.position()),
         }
     }
@@ -456,7 +439,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
     fn stream_len(&mut self) -> Result<u64, io::Error> {
         match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Last(_) => Err(io::Error::other("not seekable")),
             StreamBuffer::Seekable(ref c) => Ok(c.get_ref().len() as u64),
         }
     }
@@ -464,7 +447,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     /// panics if `next_packet` never succeded.
     fn is_at_eof(&mut self) -> Result<bool, io::Error> {
         match self.stream_buffer {
-            StreamBuffer::Last(None) => no_packet_panic!(),
+            StreamBuffer::Last(None) => Err(io::Error::other("no packets read")),
             StreamBuffer::Last(Some(ref r)) => Ok(!r.get_ref().has_remaining()),
             StreamBuffer::Seekable(ref c) => Ok(c.position() as usize >= c.get_ref().len()),
         }
@@ -476,7 +459,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     /// panics if `next_packet` never succeded.
     fn read_cmd_header(&mut self) -> Result<CmdHeader, ReadCmdHeaderError> {
         match self.stream_buffer {
-            StreamBuffer::Last(None) => no_packet_panic!(),
+            StreamBuffer::Last(None) => Err(io::Error::other("no packets read").into()),
             StreamBuffer::Last(Some(ref mut r)) => read_cmd_header(r),
             StreamBuffer::Seekable(ref mut c) => read_cmd_header(c),
         }
@@ -488,30 +471,18 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     /// panics if `next_packet` never succeded.
     fn read_cmd(&mut self, cmd_header: &CmdHeader) -> Result<&[u8], ReadCmdError> {
         match self.stream_buffer {
-            StreamBuffer::Last(None) => no_packet_panic!(),
+            StreamBuffer::Last(None) => Err(io::Error::other("no packets read").into()),
 
             StreamBuffer::Last(Some(ref mut r)) => {
                 use bytes::Buf;
 
                 let size = cmd_header.body_size as usize;
-                let bytes = r.get_mut();
-
-                // it probably could be possible that body of the response was not transferred /
-                // read correctly?
+                let bytes = r.get_ref();
                 if bytes.remaining() < size {
                     return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
                 }
 
-                // SAFETY: this is safe because lifetime of the returned slice is tied to the
-                // lifetime of r (if i'm not missing anything, am i?).
-                let data = unsafe {
-                    // NOTE: start is 0 because Reader's advance will increase start position of
-                    // the underlying slice
-                    let ptr = bytes.as_ref()[0..size].as_ptr();
-                    std::slice::from_raw_parts(ptr, size)
-                };
-                bytes.advance(size);
-                Ok(data)
+                Ok(&bytes.chunk()[..size])
             }
 
             StreamBuffer::Seekable(ref mut c) => {
@@ -552,22 +523,23 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     // ----
 
     /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
-    fn start_position(&self) -> u64 {
+    fn start_position(&self) -> io::Result<u64> {
         match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
-            StreamBuffer::Seekable(_) => 0,
+            StreamBuffer::Last(_) => Err(io::Error::other("not seekable")),
+            StreamBuffer::Seekable(_) => Ok(0),
         }
     }
 
     /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
     fn total_ticks(&mut self) -> Result<i32, anyhow::Error> {
         match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Last(_) => Err(anyhow::anyhow!("not seekable")),
             StreamBuffer::Seekable(_) => {
                 if self.total_ticks.is_none() {
                     self.total_ticks = Some(scan_for_last_tick(self)?);
                 }
-                Ok(self.total_ticks.unwrap())
+                self.total_ticks
+                    .ok_or_else(|| anyhow::anyhow!("total_ticks not available"))
             }
         }
     }

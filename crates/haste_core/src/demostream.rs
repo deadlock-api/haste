@@ -51,12 +51,12 @@ pub trait DemoStream {
     // stream ops
     // ----
 
-    fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error>;
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64>;
 
-    fn stream_position(&mut self) -> Result<u64, io::Error>;
+    fn stream_position(&mut self) -> io::Result<u64>;
 
     /// reimplementation of nightly [`std::io::Seek::stream_len`].
-    fn stream_len(&mut self) -> Result<u64, io::Error> {
+    fn stream_len(&mut self) -> io::Result<u64> {
         let old_pos = self.stream_position()?;
         let len = self.seek(SeekFrom::End(0))?;
 
@@ -69,7 +69,7 @@ pub trait DemoStream {
         Ok(len)
     }
 
-    fn is_at_eof(&mut self) -> Result<bool, io::Error> {
+    fn is_at_eof(&mut self) -> io::Result<bool> {
         Ok(self.stream_position()? == self.stream_len()?)
     }
 
@@ -78,7 +78,7 @@ pub trait DemoStream {
 
     fn read_cmd_header(&mut self) -> Result<CmdHeader, ReadCmdHeaderError>;
 
-    fn unread_cmd_header(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
+    fn unread_cmd_header(&mut self, cmd_header: &CmdHeader) -> io::Result<()> {
         self.seek(SeekFrom::Current(-(cmd_header.size as i64)))
             .map(|_| ())
     }
@@ -112,7 +112,7 @@ pub trait DemoStream {
     // Max
     // IsCompressed (flag)
 
-    fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
+    fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> io::Result<()> {
         self.seek(SeekFrom::Current(cmd_header.body_size as i64))
             .map(|_| ())
     }
@@ -120,7 +120,7 @@ pub trait DemoStream {
     // other
     // ----
 
-    fn start_position(&self) -> u64;
+    fn start_position(&self) -> io::Result<u64>;
 
     // TODO: how not cool is it to rely on anyhow here?
     fn total_ticks(&mut self) -> Result<i32, anyhow::Error>;

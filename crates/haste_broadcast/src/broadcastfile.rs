@@ -97,14 +97,15 @@ impl<R: Read + Seek> DemoStream for BroadcastFile<R> {
     // other
     // ----
 
-    fn start_position(&self) -> u64 {
-        0
+    fn start_position(&self) -> io::Result<u64> {
+        Ok(0)
     }
 
     fn total_ticks(&mut self) -> Result<i32, anyhow::Error> {
         if self.total_ticks.is_none() {
             self.total_ticks = Some(scan_for_last_tick(self)?);
         }
-        Ok(self.total_ticks.unwrap())
+        self.total_ticks
+            .ok_or_else(|| anyhow::anyhow!("total_ticks not available"))
     }
 }

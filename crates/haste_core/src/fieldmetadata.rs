@@ -14,6 +14,8 @@ pub enum FieldMetadataError {
     FieldDecoderConstructionError(#[from] FieldDecoderConstructionError),
     #[error("unknown array length ident: {0}")]
     UnknownArrayLengthIdent(String),
+    #[error("missing symbol: {0}")]
+    MissingSymbol(String),
 }
 
 // NOTE: Clone is derived because FlattenedSerializerField needs to be clonable.
@@ -260,8 +262,8 @@ fn visit_any(
 
 pub(crate) fn get_field_metadata(
     field: &FlattenedSerializerField,
-    var_type: &String,
+    var_type: &str,
 ) -> Result<FieldMetadata, FieldMetadataError> {
-    let expr = vartype::parse(var_type.as_str())?;
+    let expr = vartype::parse(var_type)?;
     visit_any(expr, field)
 }

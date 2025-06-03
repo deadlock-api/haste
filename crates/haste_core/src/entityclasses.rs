@@ -10,7 +10,7 @@ pub struct ClassInfo {
 pub struct EntityClasses {
     pub classes: usize,
     pub bits: usize,
-    class_infos: Vec<ClassInfo>,
+    pub(crate) class_infos: Vec<ClassInfo>,
 }
 
 impl EntityClasses {
@@ -41,7 +41,7 @@ impl EntityClasses {
         }
     }
 
-    pub unsafe fn by_id_unckecked(&self, class_id: i32) -> &ClassInfo {
-        self.class_infos.get_unchecked(class_id as usize)
+    pub fn by_id(&self, class_id: i32) -> Option<&ClassInfo> {
+        self.class_infos.get(class_id as usize)
     }
 }

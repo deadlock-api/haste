@@ -62,7 +62,7 @@ pub(crate) fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, Dec
     Ok(CDemoSendTables {
         // TODO: no-copy for send tables cmd
         // also think about how to do no-copy when decoding protobuf.
-        data: Some((&data[4..]).to_vec()),
+        data: Some(data[4..].to_vec()),
     })
 }
 

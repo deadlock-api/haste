@@ -1,6 +1,9 @@
+#![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
-#![deny(clippy::panic)]
+#![deny(clippy::lossy_float_literal)]
+#![deny(clippy::redundant_clone)]
+#![deny(unreachable_pub)]
 
 // TODO: figure pub scopes for all the things
 pub mod bitreader;

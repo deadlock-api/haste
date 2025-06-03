@@ -1,6 +1,5 @@
-use std::cell::UnsafeCell;
+use std::cell::RefCell;
 use std::hash::BuildHasherDefault;
-use std::mem::MaybeUninit;
 use std::rc::Rc;
 
 use crate::bitreader::BitReader;
@@ -18,18 +17,16 @@ const HISTORY_BITMASK: usize = HISTORY_SIZE - 1;
 const MAX_STRING_BITS: usize = 5;
 const MAX_STRING_SIZE: usize = 1 << MAX_STRING_BITS;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StringHistoryEntry {
     string: [u8; MAX_STRING_SIZE],
 }
 
 impl StringHistoryEntry {
-    #[inline]
-    unsafe fn new_uninit() -> Self {
+    fn new_zeroed() -> Self {
         Self {
-            // NOTE: the trick is to use this correctly xd
-            #[allow(invalid_value)]
-            string: MaybeUninit::uninit().assume_init(),
+            // Use safe zero-initialization instead of uninitialized memory
+            string: [0u8; MAX_STRING_SIZE],
         }
     }
 }
@@ -40,7 +37,7 @@ const MAX_USERDATA_SIZE: usize = 1 << MAX_USERDATA_BITS;
 #[derive(Debug)]
 pub struct StringTableItem {
     pub string: Option<Vec<u8>>,
-    pub user_data: Option<Rc<UnsafeCell<Vec<u8>>>>,
+    pub user_data: Option<Rc<RefCell<Vec<u8>>>>,
 }
 
 #[derive(Debug)]
@@ -69,13 +66,6 @@ impl StringTable {
         flags: i32,
         using_varint_bitcounts: bool,
     ) -> Self {
-        #[inline(always)]
-        unsafe fn make_vec<T>(size: usize) -> Vec<T> {
-            let mut vec = Vec::with_capacity(size);
-            vec.set_len(size);
-            vec
-        }
-
         Self {
             name: name.into(),
             user_data_fixed_size,
@@ -85,10 +75,11 @@ impl StringTable {
             using_varint_bitcounts,
             items: HashMap::with_capacity_and_hasher(1024, BuildHasherDefault::default()),
 
-            history: unsafe { make_vec(HISTORY_SIZE) },
-            string_buf: unsafe { make_vec(1024) },
-            user_data_buf: unsafe { make_vec(MAX_USERDATA_SIZE) },
-            user_data_uncompressed_buf: unsafe { make_vec(MAX_USERDATA_SIZE) },
+            // Use safe vector initialization with default values
+            history: vec![StringHistoryEntry::new_zeroed(); HISTORY_SIZE],
+            string_buf: vec![0u8; 1024],
+            user_data_buf: vec![0u8; MAX_USERDATA_SIZE],
+            user_data_uncompressed_buf: vec![0u8; MAX_USERDATA_SIZE],
         }
     }
 
@@ -96,11 +87,7 @@ impl StringTable {
     //
     // some pieces are ported from csgo, some are stolen from butterfly, some
     // comments are stolen from manta.
-    pub fn parse_update(
-        &mut self,
-        br: &mut BitReader,
-        num_entries: i32,
-    ) -> Result<(), snap::Error> {
+    pub fn parse_update(&mut self, br: &mut BitReader, num_entries: i32) -> anyhow::Result<()> {
         let mut entry_index: i32 = -1;
 
         // TODO: feature flag or something for a static allocation of history,
@@ -134,13 +121,13 @@ impl StringTable {
             // or has a fixed index position. A fixed index position of zero
             // should be the last data in the buffer, and indicates that all
             // data has been read.
-            entry_index = if br.read_bool() {
+            entry_index = if br.read_bool()? {
                 entry_index + 1
             } else {
-                br.read_uvarint32() as i32 + 1
+                br.read_uvarint32()? as i32 + 1
             };
 
-            let has_string = br.read_bool();
+            let has_string = br.read_bool()?;
             let string = if has_string {
                 let mut size: usize = 0;
 
@@ -149,7 +136,7 @@ impl StringTable {
                 // position and size from the buffer, then use those to build
                 // the string combined with an extra string read (null
                 // terminated). Alternatively, just read the string.
-                if br.read_bool() {
+                if br.read_bool()? {
                     // NOTE: valve uses their CUtlVector which shifts elements
                     // to the left on delete. they maintain max len of 32. they
                     // don't allow history to grow beyond 32 elements, once it
@@ -162,18 +149,19 @@ impl StringTable {
                         history_delta_zero = history_delta_index & HISTORY_BITMASK;
                     };
 
-                    let index = (history_delta_zero + br.read_ubit64(5) as usize) & HISTORY_BITMASK;
-                    let bytestocopy = br.read_ubit64(MAX_STRING_BITS) as usize;
+                    let index =
+                        (history_delta_zero + br.read_ubit64(5)? as usize) & HISTORY_BITMASK;
+                    let bytestocopy = br.read_ubit64(MAX_STRING_BITS)? as usize;
                     size += bytestocopy;
 
                     string_buf[..bytestocopy]
                         .copy_from_slice(&history[index].string[..bytestocopy]);
-                    size += br.read_string(&mut string_buf[bytestocopy..], false);
+                    size += br.read_string(&mut string_buf[bytestocopy..], false)?;
                 } else {
-                    size += br.read_string(string_buf, false);
+                    size += br.read_string(string_buf, false)?;
                 }
 
-                let mut she = unsafe { StringHistoryEntry::new_uninit() };
+                let mut she = StringHistoryEntry::new_zeroed();
                 she.string.copy_from_slice(&string_buf[..MAX_STRING_SIZE]);
 
                 history[history_delta_index & HISTORY_BITMASK] = she;
@@ -184,28 +172,28 @@ impl StringTable {
                 None
             };
 
-            let has_user_data = br.read_bool();
+            let has_user_data = br.read_bool()?;
             let user_data = if has_user_data {
                 if self.user_data_fixed_size {
                     // Don't need to read length, it's fixed length and the length was networked down already.
-                    br.read_bits(user_data_buf, self.user_data_size_bits as usize);
+                    br.read_bits(user_data_buf, self.user_data_size_bits as usize)?;
                     Some(&user_data_buf[..self.user_data_size as usize])
                 } else {
                     let mut is_compressed = false;
                     if (self.flags & 0x1) != 0 {
-                        is_compressed = br.read_bool();
+                        is_compressed = br.read_bool()?;
                     }
 
                     // NOTE: using_varint_bitcounts bool was introduced in the
                     // new frontiers update on smaypril twemmieth of 2023,
                     // https://github.com/SteamDatabase/GameTracking-Dota2/commit/8851e24f0e3ef0b618e3a60d276a3b0baf88568c#diff-79c9dd229c77c85f462d6d85e29a65f5daf6bf31f199554438d42bd643e89448R405
                     let size = if self.using_varint_bitcounts {
-                        br.read_ubitvar() as usize
+                        br.read_ubitvar()? as usize
                     } else {
-                        br.read_ubit64(MAX_USERDATA_BITS) as usize
+                        br.read_ubit64(MAX_USERDATA_BITS)? as usize
                     };
 
-                    br.read_bytes(&mut user_data_buf[..size]);
+                    br.read_bytes(&mut user_data_buf[..size])?;
 
                     if is_compressed {
                         snap::raw::Decoder::new()
@@ -225,12 +213,13 @@ impl StringTable {
                 .and_modify(|entry| {
                     if let Some(dst_container) = entry.user_data.as_ref() {
                         if let Some(src) = user_data {
-                            let dst = unsafe { dst_container.get().as_mut().unwrap_unchecked() };
-                            dst.resize(src.len(), 0);
-                            dst.clone_from_slice(src);
+                            if let Ok(mut dst) = dst_container.try_borrow_mut() {
+                                dst.resize(src.len(), 0);
+                                dst.clone_from_slice(src);
+                            }
                         }
                     } else {
-                        entry.user_data = user_data.map(|v| Rc::new(UnsafeCell::new(v.to_vec())));
+                        entry.user_data = user_data.map(|v| Rc::new(RefCell::new(v.to_vec())));
                     }
                 })
                 .or_insert_with(|| StringTableItem {
@@ -239,7 +228,7 @@ impl StringTable {
                         dst.extend_from_slice(src);
                         dst
                     }),
-                    user_data: user_data.map(|v| Rc::new(UnsafeCell::new(v.to_vec()))),
+                    user_data: user_data.map(|v| Rc::new(RefCell::new(v.to_vec()))),
                 });
         }
 
@@ -265,14 +254,14 @@ impl StringTable {
                     existing.user_data = incoming
                         .data
                         .as_ref()
-                        .map(|data| Rc::new(UnsafeCell::new(data.clone())))
+                        .map(|data| Rc::new(RefCell::new(data.clone())))
                 })
                 .or_insert_with(|| StringTableItem {
                     string: incoming.str.as_ref().map(|v| v.as_bytes().to_vec()),
                     user_data: incoming
                         .data
                         .as_ref()
-                        .map(|data| Rc::new(UnsafeCell::new(data.clone()))),
+                        .map(|data| Rc::new(RefCell::new(data.clone()))),
                 });
         }
     }

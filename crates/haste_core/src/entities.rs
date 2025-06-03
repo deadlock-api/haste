@@ -1,12 +1,12 @@
+use dungers::bitbuf::OverflowError;
+use hashbrown::hash_map::Entry;
+use hashbrown::HashMap;
+use nohash::NoHashHasher;
 use std::fmt::{self, Binary};
 use std::hash::BuildHasherDefault;
 use std::rc::Rc;
 
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
-use nohash::NoHashHasher;
-
-use crate::bitreader::{BitReader, BitReaderOverflowError};
+use crate::bitreader::{BitReader, BitReaderError};
 use crate::entityclasses::EntityClasses;
 use crate::fielddecoder::FieldDecodeContext;
 use crate::fieldpath::{self, FieldPath};
@@ -23,6 +23,28 @@ pub enum GetValueError {
     FieldNotExist,
     #[error(transparent)]
     FieldValueConversionError(#[from] FieldValueConversionError),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum EntityError {
+    #[error("entity with index {index} does not exist")]
+    EntityNotFound { index: i32 },
+    #[error("class with id {class_id} does not exist")]
+    ClassNotFound { class_id: i32 },
+    #[error("serializer with hash {hash} does not exist")]
+    SerializerNotFound { hash: u64 },
+    #[error("field path index {index} is out of bounds")]
+    FieldPathIndexOutOfBounds { index: usize },
+    #[error("field index {index} is out of bounds")]
+    FieldIndexOutOfBounds { index: usize },
+    #[error("baseline data not found for class {class_id}")]
+    BaselineNotFound { class_id: i32 },
+    #[error(transparent)]
+    BitReaderOverflow(#[from] OverflowError),
+    #[error(transparent)]
+    BitReaderError(#[from] BitReaderError),
+    #[error("field path error")]
+    FieldPath(#[from] fieldpath::FieldPathError),
 }
 
 // public/const.h (adjusted)
@@ -64,8 +86,7 @@ pub fn ehandle_to_index(handle: u32) -> i32 {
 fn coord_from_cell(cell_width: u32, max_coord: u32, cell: u16, vec: f32) -> f32 {
     let cell_pos = cell as u32 * cell_width;
     // nanitfi is r, what does it stand for in this context? (copypasting from valve)
-    let r = (cell_pos as i32 - max_coord as i32) as f32 + vec;
-    r
+    (cell_pos as i32 - max_coord as i32) as f32 + vec
 }
 
 mod deadlock {
@@ -167,11 +188,11 @@ impl DeltaHeader {
     // true -> true; FHDR_LEAVEPVS and FHDR_DELETE
     pub const DELETE: Self = Self(0b11);
 
-    pub(crate) fn from_bit_reader(br: &mut BitReader) -> Self {
+    pub(crate) fn from_bit_reader(br: &mut BitReader) -> Result<Self, BitReaderError> {
         // TODO(blukai): also try merging two bits from read_bool. who's faster?
         let mut buf = [0u8];
-        br.read_bits(&mut buf, 2);
-        Self(buf[0])
+        br.read_bits(&mut buf, 2)?;
+        Ok(Self(buf[0]))
     }
 }
 
@@ -194,57 +215,70 @@ impl Entity {
         field_decode_ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
         fps: &mut [FieldPath],
-    ) -> Result<(), BitReaderOverflowError> {
+    ) -> Result<(), EntityError> {
         // eprintln!("-- {:?}", self.serializer.serializer_name);
 
-        unsafe {
-            let fp_count = fieldpath::read_field_paths(br, fps);
-            for i in 0..fp_count {
-                let fp = fps.get_unchecked(i);
+        let fp_count = fieldpath::read_field_paths(br, fps)?;
+        for i in 0..fp_count {
+            let fp = fps
+                .get(i)
+                .ok_or(EntityError::FieldPathIndexOutOfBounds { index: i })?;
 
-                // eprint!("{:?} ", &fp.data[..=fp.last]);
+            // eprint!("{:?} ", &fp.data[..=fp.last]);
 
-                // NOTE: this loop performes much better then the unrolled
-                // version of it, probably because a bunch of ifs cause a bunch
-                // of branch misses and branch missles are disasterous.
-                let mut field = self.serializer.get_child_unchecked(fp.get_unchecked(0));
-                // NOTE: field.var_name.hash is a "seed" for field_key_hash.
-                let mut field_key = field.var_name.hash;
-                for i in 1..=fp.last() {
-                    if field.is_dynamic_array() {
-                        field = field.get_child_unchecked(0);
-                        // NOTE: it's sort of weird to hash index, yup. but it simplifies things
-                        // when "user" builds a key that has numbers / it makes it so that there's
-                        // no need to check whether part of a key needs to be hashed or not - just
-                        // hash all parts.
-                        field_key = fxhash::add_u64_to_hash(
-                            field_key,
-                            fxhash::add_u64_to_hash(0, fp.get_unchecked(i) as u64),
-                        );
-                    } else {
-                        field = field.get_child_unchecked(fp.get_unchecked(i));
-                        field_key = fxhash::add_u64_to_hash(field_key, field.var_name.hash);
-                    };
-                }
+            // NOTE: this loop performs much better than the unrolled
+            // version of it, probably because a bunch of ifs cause a bunch
+            // of branch misses and branch misses are disastrous.
+            let first_index = fp
+                .get(0)
+                .ok_or(EntityError::FieldPathIndexOutOfBounds { index: 0 })?;
+            let mut field = self
+                .serializer
+                .get_child(first_index)
+                .ok_or(EntityError::FieldIndexOutOfBounds { index: first_index })?;
 
-                // eprint!("{:?} {:?} ", field.var_name, field.var_type);
+            // NOTE: field.var_name.hash is a "seed" for field_key_hash.
+            let mut field_key = field.var_name.hash;
 
-                let field_value = field.metadata.decoder.decode(field_decode_ctx, br);
+            for i in 1..=fp.last() {
+                let fp_index = fp
+                    .get(i)
+                    .ok_or(EntityError::FieldPathIndexOutOfBounds { index: i })?;
 
-                // eprintln!(" -> {:?}", &field_value);
-
-                match self.fields.entry(field_key) {
-                    Entry::Occupied(mut oe) => {
-                        oe.get_mut().value = field_value;
-                    }
-                    Entry::Vacant(ve) => {
-                        ve.insert(EntityField { value: field_value });
-                    }
-                }
+                if field.is_dynamic_array() {
+                    field = field
+                        .get_child(0)
+                        .ok_or(EntityError::FieldIndexOutOfBounds { index: 0 })?;
+                    // NOTE: it's sort of weird to hash index, yup. but it simplifies things
+                    // when "user" builds a key that has numbers / it makes it so that there's
+                    // no need to check whether part of a key needs to be hashed or not - just
+                    // hash all parts.
+                    field_key = fxhash::add_u64_to_hash(
+                        field_key,
+                        fxhash::add_u64_to_hash(0, fp_index as u64),
+                    );
+                } else {
+                    field = field
+                        .get_child(fp_index)
+                        .ok_or(EntityError::FieldIndexOutOfBounds { index: fp_index })?;
+                    field_key = fxhash::add_u64_to_hash(field_key, field.var_name.hash);
+                };
             }
 
-            // dbg!(&self.field_values);
-            // panic!();
+            // eprint!("{:?} {:?} ", field.var_name, field.var_type);
+
+            let field_value = field.metadata.decoder.decode(field_decode_ctx, br)?;
+
+            // eprintln!(" -> {:?}", &field_value);
+
+            match self.fields.entry(field_key) {
+                Entry::Occupied(mut oe) => {
+                    oe.get_mut().value = field_value;
+                }
+                Entry::Vacant(ve) => {
+                    ve.insert(EntityField { value: field_value });
+                }
+            }
         }
 
         Ok(())
@@ -274,7 +308,7 @@ impl Entity {
     ///
     /// - if the value is missing, it returns [`GetValueError::FieldNotExist`]
     /// - if the value is present but convesion failed, returns
-    /// [`GetValueError::FieldValueConversionError`]
+    ///   [`GetValueError::FieldValueConversionError`]
     pub fn try_get_value<T>(&self, key: &u64) -> Result<T, GetValueError>
     where
         FieldValue: TryInto<T, Error = FieldValueConversionError>,
@@ -352,14 +386,19 @@ impl EntityContainer {
         entity_classes: &EntityClasses,
         instance_baseline: &InstanceBaseline,
         serializers: &FlattenedSerializerContainer,
-    ) -> Result<&Entity, BitReaderOverflowError> {
-        let class_id = br.read_ubit64(entity_classes.bits) as i32;
-        let _serial = br.read_ubit64(NUM_SERIAL_NUM_BITS as usize);
-        let _unknown = br.read_uvarint32();
+    ) -> Result<&Entity, EntityError> {
+        let class_id = br.read_ubit64(entity_classes.bits)? as i32;
+        let _serial = br.read_ubit64(NUM_SERIAL_NUM_BITS as usize)?;
+        let _unknown = br.read_uvarint32()?;
 
-        let class_info = unsafe { entity_classes.by_id_unckecked(class_id) };
-        let serializer =
-            unsafe { serializers.by_name_hash_unckecked(class_info.network_name_hash) };
+        let class_info = entity_classes
+            .by_id(class_id)
+            .ok_or(EntityError::ClassNotFound { class_id })?;
+        let serializer = serializers
+            .by_name_hash(class_info.network_name_hash)
+            .ok_or(EntityError::SerializerNotFound {
+                hash: class_info.network_name_hash,
+            })?;
 
         let mut entity = match self.baseline_entities.entry(class_id) {
             Entry::Occupied(oe) => {
@@ -376,11 +415,12 @@ impl EntityContainer {
                     ),
                     serializer,
                 };
-                let baseline_data = unsafe { instance_baseline.by_id_unchecked(class_id) };
+                let baseline_data = instance_baseline
+                    .by_id(class_id)
+                    .ok_or(EntityError::BaselineNotFound { class_id })?;
 
-                let mut baseline_br = BitReader::new(baseline_data);
+                let mut baseline_br = BitReader::new(&baseline_data);
                 entity.parse(field_decode_ctx, &mut baseline_br, &mut self.field_paths)?;
-                baseline_br.is_overflowed()?;
 
                 ve.insert(entity).clone()
             }
@@ -389,39 +429,30 @@ impl EntityContainer {
         entity.parse(field_decode_ctx, br, &mut self.field_paths)?;
 
         self.entities.insert(index, entity);
-        // SAFETY: the entity was just inserted ^, it's safe.
-        Ok(unsafe { self.entities.get(&index).unwrap_unchecked() })
+        // The entity was just inserted, so it's guaranteed to exist
+        self.entities
+            .get(&index)
+            .ok_or(EntityError::EntityNotFound { index })
     }
 
-    // SAFETY: if it's being deleted menas that it was created, riiight? but
-    // there's a risk (that only should exist if replay is corrupted).
-    pub(crate) unsafe fn handle_delete_unchecked(&mut self, index: i32) -> Entity {
-        let entity = self.entities.remove(&index);
-
-        debug_assert!(
-            entity.is_some(),
-            "tried to delete non-existent entity #{index}"
-        );
-
-        entity.unwrap_unchecked()
+    /// Delete an entity, returning an error if it doesn't exist.
+    pub(crate) fn handle_delete(&mut self, index: i32) -> Result<Entity, EntityError> {
+        self.entities
+            .remove(&index)
+            .ok_or(EntityError::EntityNotFound { index })
     }
 
-    // SAFETY: if entity was ever created, and not deleted, it can be updated!
-    // but there's a risk (that only should exist if replay is corrupted).
-    pub(crate) unsafe fn handle_update_unchecked(
+    /// Update an entity, returning an error if it doesn't exist.
+    pub(crate) fn handle_update(
         &mut self,
         index: i32,
         field_decode_ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<&Entity, BitReaderOverflowError> {
-        let entity = self.entities.get_mut(&index);
-
-        debug_assert!(
-            entity.is_some(),
-            "tried to update non-existent entity #{index}"
-        );
-
-        let entity = entity.unwrap_unchecked();
+    ) -> Result<&Entity, EntityError> {
+        let entity = self
+            .entities
+            .get_mut(&index)
+            .ok_or(EntityError::EntityNotFound { index })?;
         entity.parse(field_decode_ctx, br, &mut self.field_paths)?;
         Ok(entity)
     }

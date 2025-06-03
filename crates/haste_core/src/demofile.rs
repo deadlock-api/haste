@@ -38,6 +38,20 @@ pub enum DemoHeaderError {
     InvalidDemoFileStamp { got: [u8; DEMO_HEADER_ID_SIZE] },
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DemoFileError {
+    #[error(transparent)]
+    IoError(#[from] io::Error),
+    #[error(transparent)]
+    DecodeError(#[from] prost::DecodeError),
+    #[error(transparent)]
+    ReadCmdHeaderError(#[from] ReadCmdHeaderError),
+    #[error(transparent)]
+    ReadCmdError(#[from] ReadCmdError),
+    #[error("file info not available")]
+    FileInfoNotAvailable,
+}
+
 fn read_demo_header<R: Read>(mut rdr: R) -> Result<DemoHeader, DemoHeaderError> {
     let mut demofilestamp = [0u8; DEMO_HEADER_ID_SIZE];
     rdr.read_exact(&mut demofilestamp)?;
@@ -89,7 +103,7 @@ impl<R: Read + Seek> DemoFile<R> {
         &self.demo_header
     }
 
-    pub fn file_info(&mut self) -> Result<&CDemoFileInfo, anyhow::Error> {
+    pub fn file_info(&mut self) -> Result<&CDemoFileInfo, DemoFileError> {
         if self.file_info.is_none() {
             let backup = self.stream_position()?;
 
@@ -100,7 +114,9 @@ impl<R: Read + Seek> DemoFile<R> {
             self.seek(SeekFrom::Start(backup))?;
         }
 
-        Ok(self.file_info.as_ref().expect("file info have been read"))
+        self.file_info
+            .as_ref()
+            .ok_or(DemoFileError::FileInfoNotAvailable)
     }
 }
 
@@ -209,11 +225,13 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
     // other
     // ----
 
-    fn start_position(&self) -> u64 {
-        size_of::<DemoHeader>() as u64
+    fn start_position(&self) -> io::Result<u64> {
+        Ok(size_of::<DemoHeader>() as u64)
     }
 
     fn total_ticks(&mut self) -> Result<i32, anyhow::Error> {
-        self.file_info().map(|file_info| file_info.playback_ticks())
+        self.file_info()
+            .map(|file_info| file_info.playback_ticks())
+            .map_err(|e| e.into())
     }
 }

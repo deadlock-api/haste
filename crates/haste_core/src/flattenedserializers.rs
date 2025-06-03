@@ -24,6 +24,8 @@ pub enum FlattenedSerializersError {
     ReadVarintError(#[from] varint::ReadVarintError),
     #[error(transparent)]
     FieldMetadataError(#[from] FieldMetadataError),
+    #[error("missing symbol: {0}")]
+    MissingSymbol(String),
 }
 
 // TODO: symbol table / string cache (but do not use servo's string cache
@@ -86,25 +88,17 @@ impl FlattenedSerializerField {
         msg: &CsvcMsgFlattenedSerializer,
         field: &ProtoFlattenedSerializerFieldT,
     ) -> Result<Self, FieldMetadataError> {
-        // SAFETY: some symbols are cricual, if they don't exist - fail early
-        // and loudly.
-        //
-        // TODO: do not call get_unchecked here! that's stupid.
-        let resolve_sym_unchecked = |i: i32| unsafe { msg.symbols.get_unchecked(i as usize) };
+        // Use safe operations with proper error handling
         let resolve_sym = |v: i32| &msg.symbols[v as usize];
 
-        let var_type = unsafe {
-            field
-                .var_type_sym
-                .map(resolve_sym_unchecked)
-                .unwrap_unchecked()
-        };
-        let var_name = unsafe {
-            field
-                .var_name_sym
-                .map(resolve_sym_unchecked)
-                .unwrap_unchecked()
-        };
+        let var_type = field
+            .var_type_sym
+            .map(resolve_sym)
+            .ok_or_else(|| FieldMetadataError::MissingSymbol("var_type_sym".to_string()))?;
+        let var_name = field
+            .var_name_sym
+            .map(resolve_sym)
+            .ok_or_else(|| FieldMetadataError::MissingSymbol("var_name_sym".to_string()))?;
 
         let mut ret = Self {
             var_type: Symbol::from(var_type),
@@ -126,16 +120,6 @@ impl FlattenedSerializerField {
         Ok(ret)
     }
 
-    pub(crate) unsafe fn get_child_unchecked(&self, index: usize) -> &Self {
-        let fs = self.field_serializer.as_ref();
-
-        debug_assert!(fs.is_some(), "field serializer is missing");
-
-        fs.unwrap_unchecked().get_child_unchecked(index)
-    }
-
-    // NOTE: using this method can hurt performance when used in critical code
-    // paths. use the unsafe [`Self::get_child_unchecked`] instead.
     pub fn get_child(&self, index: usize) -> Option<&Self> {
         self.field_serializer
             .as_ref()
@@ -172,35 +156,22 @@ pub struct FlattenedSerializer {
 }
 
 impl FlattenedSerializer {
-    fn new(msg: &CsvcMsgFlattenedSerializer, fs: &ProtoFlattenedSerializerT) -> Self {
-        // SAFETY: some symbols are cricual, if they don't exist - fail early
-        // and loudly.
-        let resolve_sym_unchecked = |i: i32| unsafe { msg.symbols.get_unchecked(i as usize) };
+    fn new(
+        msg: &CsvcMsgFlattenedSerializer,
+        fs: &ProtoFlattenedSerializerT,
+    ) -> Result<Self, FlattenedSerializersError> {
+        let resolve_sym = |v: i32| &msg.symbols[v as usize];
 
-        let serializer_name = unsafe {
-            fs.serializer_name_sym
-                .map(resolve_sym_unchecked)
-                .unwrap_unchecked()
-        };
+        let serializer_name = fs.serializer_name_sym.map(resolve_sym).ok_or_else(|| {
+            FlattenedSerializersError::MissingSymbol("serializer_name_sym".to_string())
+        })?;
 
-        Self {
+        Ok(Self {
             serializer_name: Symbol::from(serializer_name),
             fields: Vec::with_capacity(fs.fields_index.len()),
-        }
+        })
     }
 
-    pub(crate) unsafe fn get_child_unchecked(&self, index: usize) -> &FlattenedSerializerField {
-        debug_assert!(
-            self.fields.get(index).is_some(),
-            "field at index {} is missing",
-            index,
-        );
-
-        self.fields.get_unchecked(index)
-    }
-
-    // NOTE: using this method can hurt performance when used in critical code
-    // paths. use the unsafe [`Self::get_child_unchecked`] instead.
     pub fn get_child(&self, index: usize) -> Option<&FlattenedSerializerField> {
         self.fields.get(index).map(|field| field.as_ref())
     }
@@ -241,7 +212,7 @@ impl FlattenedSerializerContainer {
         );
 
         for serializer in msg.serializers.iter() {
-            let mut flattened_serializer = FlattenedSerializer::new(&msg, serializer);
+            let mut flattened_serializer = FlattenedSerializer::new(&msg, serializer)?;
 
             for field_index in serializer.fields_index.iter() {
                 if let Some(field) = field_map.get(field_index) {
@@ -314,22 +285,8 @@ impl FlattenedSerializerContainer {
         Ok(Self { serializer_map })
     }
 
-    // TODO: think about exposing the whole serializer map
-
     pub fn by_name_hash(&self, serializer_name_hash: u64) -> Option<Rc<FlattenedSerializer>> {
         self.serializer_map.get(&serializer_name_hash).cloned()
-    }
-
-    pub unsafe fn by_name_hash_unckecked(
-        &self,
-        serializer_name_hash: u64,
-    ) -> Rc<FlattenedSerializer> {
-        self.serializer_map
-            .get(&serializer_name_hash)
-            .unwrap_unchecked()
-            // NOTE: do not chain .cloned() after calling .get(), because .cloned() uses match
-            // under the hood which adds a branch; that is redunant.
-            .clone()
     }
 
     pub fn values(&self) -> Values<'_, u64, Rc<FlattenedSerializer>> {

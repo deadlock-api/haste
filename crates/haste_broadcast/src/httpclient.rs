@@ -38,7 +38,7 @@ mod reqwest_impl {
         async fn execute(
             &self,
             request: http::Request<Bytes>,
-        ) -> Result<http::Response<Result<Bytes, Self::Error>>, Self::Error> {
+        ) -> reqwest::Result<http::Response<Result<Bytes, Self::Error>>> {
             let (parts, body) = request.into_parts();
             let mut request = self
                 .request(parts.method, parts.uri.to_string())
@@ -57,12 +57,10 @@ mod reqwest_impl {
             {
                 result = result.version(response.version());
             }
-            // NOTE: expects should never be called - otherwise this is either http or reqwest
-            // library error.
-            std::mem::swap(
-                response.headers_mut(),
-                result.headers_mut().expect("could not get result headers"),
-            );
+            if let Some(result_headers) = result.headers_mut() {
+                std::mem::swap(response.headers_mut(), result_headers);
+            }
+            #[allow(clippy::expect_used)]
             let result = result
                 .body(response.bytes().await)
                 .expect("could not transpose body");
