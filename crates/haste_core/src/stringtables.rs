@@ -282,17 +282,14 @@ impl StringTable {
     // void EnableRollback();
     // void RestoreTick(int tick);
 
-    #[inline]
     pub fn name(&self) -> &str {
         self.name.as_ref()
     }
 
-    #[inline]
     pub fn items(&self) -> impl Iterator<Item = (&i32, &StringTableItem)> {
         self.items.iter()
     }
 
-    #[inline]
     pub fn get_item(&self, entry_index: &i32) -> Option<&StringTableItem> {
         self.items.get(entry_index)
     }
@@ -357,17 +354,14 @@ impl StringTableContainer {
     }
 
     // INetworkStringTable	*GetTable( TABLEID stringTable ) const;
-    #[inline]
     pub fn get_table(&self, id: usize) -> Option<&StringTable> {
         self.tables.get(id)
     }
 
-    #[inline]
     pub fn get_table_mut(&mut self, id: usize) -> Option<&mut StringTable> {
         self.tables.get_mut(id)
     }
 
-    #[inline]
     pub fn has_table(&self, id: usize) -> bool {
         self.get_table(id).is_some()
     }
@@ -400,7 +394,6 @@ impl StringTableContainer {
     // void RestoreTick( int tick );
 
     // TODO: rename to iter?
-    #[inline]
     pub fn tables(&self) -> impl Iterator<Item = &StringTable> {
         self.tables.iter()
     }

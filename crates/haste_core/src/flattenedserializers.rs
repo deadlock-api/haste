@@ -39,7 +39,6 @@ pub struct Symbol {
 }
 
 impl From<&String> for Symbol {
-    #[inline(always)]
     fn from(value: &String) -> Self {
         Self {
             hash: fxhash::hash_bytes(value.as_bytes()),
@@ -127,7 +126,6 @@ impl FlattenedSerializerField {
         Ok(ret)
     }
 
-    #[inline(always)]
     pub(crate) unsafe fn get_child_unchecked(&self, index: usize) -> &Self {
         let fs = self.field_serializer.as_ref();
 
@@ -144,12 +142,10 @@ impl FlattenedSerializerField {
             .and_then(|fs| fs.get_child(index))
     }
 
-    #[inline(always)]
     pub(crate) fn var_encoder_heq(&self, rhs: u64) -> bool {
         self.var_encoder.as_ref().is_some_and(|lhs| lhs.hash == rhs)
     }
 
-    #[inline(always)]
     pub fn is_dynamic_array(&self) -> bool {
         self.metadata
             .special_descriptor
@@ -193,7 +189,6 @@ impl FlattenedSerializer {
         }
     }
 
-    #[inline(always)]
     pub(crate) unsafe fn get_child_unchecked(&self, index: usize) -> &FlattenedSerializerField {
         debug_assert!(
             self.fields.get(index).is_some(),
@@ -321,12 +316,10 @@ impl FlattenedSerializerContainer {
 
     // TODO: think about exposing the whole serializer map
 
-    #[inline(always)]
     pub fn by_name_hash(&self, serializer_name_hash: u64) -> Option<Rc<FlattenedSerializer>> {
         self.serializer_map.get(&serializer_name_hash).cloned()
     }
 
-    #[inline(always)]
     pub unsafe fn by_name_hash_unckecked(
         &self,
         serializer_name_hash: u64,
@@ -339,7 +332,6 @@ impl FlattenedSerializerContainer {
             .clone()
     }
 
-    #[inline]
     pub fn values(&self) -> Values<'_, u64, Rc<FlattenedSerializer>> {
         self.serializer_map.values()
     }

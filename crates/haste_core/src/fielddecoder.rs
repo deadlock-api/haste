@@ -115,7 +115,6 @@ pub(crate) struct U64Decoder {
 // NOTE: default should only be used to decode dynamic array lengths. for everything else decoder
 // must be constructed using U64Decoder's new method.
 impl Default for U64Decoder {
-    #[inline]
     fn default() -> Self {
         Self {
             decoder: Box::<InternalU64Decoder>::default(),
@@ -124,7 +123,6 @@ impl Default for U64Decoder {
 }
 
 impl U64Decoder {
-    #[inline]
     pub(crate) fn new(field: &FlattenedSerializerField) -> Self {
         if field.var_encoder_heq(fxhash::hash_bytes(b"fixed64")) {
             Self {
@@ -212,7 +210,6 @@ struct InternalQuantizedFloatDecoder {
 }
 
 impl InternalQuantizedFloatDecoder {
-    #[inline]
     pub(crate) fn new(
         field: &FlattenedSerializerField,
     ) -> Result<Self, FieldDecoderConstructionError> {
@@ -296,7 +293,6 @@ pub(crate) struct F32Decoder {
 }
 
 impl F32Decoder {
-    #[inline]
     pub(crate) fn new(
         field: &FlattenedSerializerField,
     ) -> Result<Self, FieldDecoderConstructionError> {
@@ -345,7 +341,6 @@ pub(crate) struct Vector3Decoder {
 }
 
 impl Vector3Decoder {
-    #[inline]
     pub(crate) fn new(
         field: &FlattenedSerializerField,
     ) -> Result<Self, FieldDecoderConstructionError> {
@@ -377,7 +372,6 @@ pub(crate) struct Vector2Decoder {
 }
 
 impl Vector2Decoder {
-    #[inline]
     pub(crate) fn new(
         field: &FlattenedSerializerField,
     ) -> Result<Self, FieldDecoderConstructionError> {
@@ -402,7 +396,6 @@ pub(crate) struct Vector4Decoder {
 }
 
 impl Vector4Decoder {
-    #[inline]
     pub(crate) fn new(
         field: &FlattenedSerializerField,
     ) -> Result<Self, FieldDecoderConstructionError> {

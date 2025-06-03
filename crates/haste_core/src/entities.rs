@@ -61,7 +61,6 @@ pub fn ehandle_to_index(handle: u32) -> i32 {
 /// given a cell and an offset in that cell, reconstruct the world coord.
 ///
 /// game/shared/cellcoord.h
-#[inline]
 fn coord_from_cell(cell_width: u32, max_coord: u32, cell: u16, vec: f32) -> f32 {
     let cell_pos = cell as u32 * cell_width;
     // nanitfi is r, what does it stand for in this context? (copypasting from valve)
@@ -168,7 +167,6 @@ impl DeltaHeader {
     // true -> true; FHDR_LEAVEPVS and FHDR_DELETE
     pub const DELETE: Self = Self(0b11);
 
-    #[inline(always)]
     pub(crate) fn from_bit_reader(br: &mut BitReader) -> Self {
         // TODO(blukai): also try merging two bits from read_bool. who's faster?
         let mut buf = [0u8];
@@ -397,7 +395,6 @@ impl EntityContainer {
 
     // SAFETY: if it's being deleted menas that it was created, riiight? but
     // there's a risk (that only should exist if replay is corrupted).
-    #[inline]
     pub(crate) unsafe fn handle_delete_unchecked(&mut self, index: i32) -> Entity {
         let entity = self.entities.remove(&index);
 
@@ -411,7 +408,6 @@ impl EntityContainer {
 
     // SAFETY: if entity was ever created, and not deleted, it can be updated!
     // but there's a risk (that only should exist if replay is corrupted).
-    #[inline]
     pub(crate) unsafe fn handle_update_unchecked(
         &mut self,
         index: i32,

@@ -59,7 +59,6 @@
 const GOLDEN_RATIO: u64 = 0x517cc1b727220a95;
 const ROTATION_LENGTH: u32 = 5;
 
-#[inline(always)]
 pub const fn add_u64_to_hash(hash: u64, value: u64) -> u64 {
     (hash.rotate_left(ROTATION_LENGTH) ^ value).wrapping_mul(GOLDEN_RATIO)
 }
@@ -75,7 +74,6 @@ pub const fn add_u64_to_hash(hash: u64, value: u64) -> u64 {
 /// note that this functions is not as fast as it could be due to not yet figured out rust comptile
 /// issues with mem alignment. ultimately it would transmute u8s into u64s and hashe as many u64s
 /// as possible, and then remaining u8s if any.
-#[inline]
 pub const fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut hash = 0;
 
