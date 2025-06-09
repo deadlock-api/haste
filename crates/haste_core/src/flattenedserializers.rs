@@ -1,11 +1,10 @@
-use std::hash::BuildHasherDefault;
-use std::rc::Rc;
-
 use dungers::varint;
 use hashbrown::hash_map::Values;
 use hashbrown::HashMap;
 use nohash::NoHashHasher;
 use prost::{self, Message};
+use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 use valveprotos::common::{
     CDemoSendTables, CsvcMsgFlattenedSerializer, ProtoFlattenedSerializerFieldT,
     ProtoFlattenedSerializerT,
@@ -77,7 +76,7 @@ pub struct FlattenedSerializerField {
     pub field_serializer_name: Option<Symbol>,
     pub var_encoder: Option<Symbol>,
 
-    pub field_serializer: Option<Rc<FlattenedSerializer>>,
+    pub field_serializer: Option<Arc<FlattenedSerializer>>,
     pub(crate) metadata: FieldMetadata,
 }
 
@@ -152,7 +151,7 @@ impl FlattenedSerializerField {
 #[derive(Debug, Clone, Default)]
 pub struct FlattenedSerializer {
     pub serializer_name: Symbol,
-    pub fields: Vec<Rc<FlattenedSerializerField>>,
+    pub fields: Vec<Arc<FlattenedSerializerField>>,
 }
 
 impl FlattenedSerializer {
@@ -177,8 +176,8 @@ impl FlattenedSerializer {
     }
 }
 
-type FieldMap = HashMap<i32, Rc<FlattenedSerializerField>, BuildHasherDefault<NoHashHasher<i32>>>;
-type SerializerMap = HashMap<u64, Rc<FlattenedSerializer>, BuildHasherDefault<NoHashHasher<u64>>>;
+type FieldMap = HashMap<i32, Arc<FlattenedSerializerField>, BuildHasherDefault<NoHashHasher<i32>>>;
+type SerializerMap = HashMap<u64, Arc<FlattenedSerializer>, BuildHasherDefault<NoHashHasher<u64>>>;
 
 pub struct FlattenedSerializerContainer {
     serializer_map: SerializerMap,
@@ -230,10 +229,10 @@ impl FlattenedSerializerContainer {
                             .field_serializer_name
                             .as_ref()
                             .and_then(|symbol| serializer_map.get(&symbol.hash).cloned());
-                        Some(Rc::new(FlattenedSerializer {
+                        Some(Arc::new(FlattenedSerializer {
                             fields: {
                                 let mut fields = Vec::with_capacity(length);
-                                fields.resize(length, Rc::new(field));
+                                fields.resize(length, Arc::new(field));
                                 fields
                             },
                             ..Default::default()
@@ -247,8 +246,8 @@ impl FlattenedSerializerContainer {
                             },
                             ..Default::default()
                         };
-                        Some(Rc::new(FlattenedSerializer {
-                            fields: vec![Rc::new(field)],
+                        Some(Arc::new(FlattenedSerializer {
+                            fields: vec![Arc::new(field)],
                             ..Default::default()
                         }))
                     }
@@ -260,8 +259,8 @@ impl FlattenedSerializerContainer {
                                 .and_then(|symbol| serializer_map.get(&symbol.hash).cloned()),
                             ..Default::default()
                         };
-                        Some(Rc::new(FlattenedSerializer {
-                            fields: vec![Rc::new(field)],
+                        Some(Arc::new(FlattenedSerializer {
+                            fields: vec![Arc::new(field)],
                             ..Default::default()
                         }))
                     }
@@ -271,25 +270,25 @@ impl FlattenedSerializerContainer {
                         .and_then(|symbol| serializer_map.get(&symbol.hash).cloned()),
                 };
 
-                let field = Rc::new(field);
+                let field = Arc::new(field);
                 field_map.insert(*field_index, field.clone());
                 flattened_serializer.fields.push(field);
             }
 
             serializer_map.insert(
                 flattened_serializer.serializer_name.hash,
-                Rc::new(flattened_serializer),
+                Arc::new(flattened_serializer),
             );
         }
 
         Ok(Self { serializer_map })
     }
 
-    pub fn by_name_hash(&self, serializer_name_hash: u64) -> Option<Rc<FlattenedSerializer>> {
+    pub fn by_name_hash(&self, serializer_name_hash: u64) -> Option<Arc<FlattenedSerializer>> {
         self.serializer_map.get(&serializer_name_hash).cloned()
     }
 
-    pub fn values(&self) -> Values<'_, u64, Rc<FlattenedSerializer>> {
+    pub fn values(&self) -> Values<'_, u64, Arc<FlattenedSerializer>> {
         self.serializer_map.values()
     }
 }

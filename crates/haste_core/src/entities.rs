@@ -1,11 +1,3 @@
-use dungers::bitbuf::OverflowError;
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
-use nohash::NoHashHasher;
-use std::fmt::{self, Binary};
-use std::hash::BuildHasherDefault;
-use std::rc::Rc;
-
 use crate::bitreader::{BitReader, BitReaderError};
 use crate::entityclasses::EntityClasses;
 use crate::fielddecoder::FieldDecodeContext;
@@ -16,6 +8,13 @@ use crate::flattenedserializers::{
 };
 use crate::fxhash;
 use crate::instancebaseline::InstanceBaseline;
+use dungers::bitbuf::OverflowError;
+use hashbrown::hash_map::Entry;
+use hashbrown::HashMap;
+use nohash::NoHashHasher;
+use std::fmt::{self, Binary};
+use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug)]
 pub enum GetValueError {
@@ -206,7 +205,7 @@ struct EntityField {
 pub struct Entity {
     index: i32,
     fields: HashMap<u64, EntityField, BuildHasherDefault<NoHashHasher<u64>>>,
-    serializer: Rc<FlattenedSerializer>,
+    serializer: Arc<FlattenedSerializer>,
 }
 
 impl Entity {
