@@ -1,10 +1,8 @@
-use std::cell::RefCell;
-use std::hash::BuildHasherDefault;
-use std::rc::Rc;
-
 use crate::bitreader::BitReader;
 use hashbrown::HashMap;
 use nohash::NoHashHasher;
+use std::hash::BuildHasherDefault;
+use std::sync::{Arc, Mutex};
 use valveprotos::common::c_demo_string_tables::TableT;
 use valveprotos::common::CDemoStringTables;
 
@@ -37,7 +35,7 @@ const MAX_USERDATA_SIZE: usize = 1 << MAX_USERDATA_BITS;
 #[derive(Debug)]
 pub struct StringTableItem {
     pub string: Option<Vec<u8>>,
-    pub user_data: Option<Rc<RefCell<Vec<u8>>>>,
+    pub user_data: Option<Arc<Mutex<Vec<u8>>>>,
 }
 
 #[derive(Debug)]
@@ -213,13 +211,13 @@ impl StringTable {
                 .and_modify(|entry| {
                     if let Some(dst_container) = entry.user_data.as_ref() {
                         if let Some(src) = user_data {
-                            if let Ok(mut dst) = dst_container.try_borrow_mut() {
+                            if let Ok(mut dst) = dst_container.try_lock() {
                                 dst.resize(src.len(), 0);
                                 dst.clone_from_slice(src);
                             }
                         }
                     } else {
-                        entry.user_data = user_data.map(|v| Rc::new(RefCell::new(v.to_vec())));
+                        entry.user_data = user_data.map(|v| Arc::new(Mutex::new(v.to_vec())));
                     }
                 })
                 .or_insert_with(|| StringTableItem {
@@ -228,7 +226,7 @@ impl StringTable {
                         dst.extend_from_slice(src);
                         dst
                     }),
-                    user_data: user_data.map(|v| Rc::new(RefCell::new(v.to_vec()))),
+                    user_data: user_data.map(|v| Arc::new(Mutex::new(v.to_vec()))),
                 });
         }
 
@@ -254,14 +252,14 @@ impl StringTable {
                     existing.user_data = incoming
                         .data
                         .as_ref()
-                        .map(|data| Rc::new(RefCell::new(data.clone())))
+                        .map(|data| Arc::new(Mutex::new(data.clone())))
                 })
                 .or_insert_with(|| StringTableItem {
                     string: incoming.str.as_ref().map(|v| v.as_bytes().to_vec()),
                     user_data: incoming
                         .data
                         .as_ref()
-                        .map(|data| Rc::new(RefCell::new(data.clone()))),
+                        .map(|data| Arc::new(Mutex::new(data.clone()))),
                 });
         }
     }

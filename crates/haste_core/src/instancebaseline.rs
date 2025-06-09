@@ -1,14 +1,12 @@
-use std::cell::RefCell;
-use std::num::ParseIntError;
-use std::rc::Rc;
-
 use crate::stringtables::StringTable;
+use std::num::ParseIntError;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 pub(crate) const INSTANCE_BASELINE_TABLE_NAME: &str = "instancebaseline";
 
 #[derive(Default)]
 pub(crate) struct InstanceBaseline {
-    data: Vec<Option<Rc<RefCell<Vec<u8>>>>>,
+    data: Vec<Option<Arc<Mutex<Vec<u8>>>>>,
 }
 
 impl InstanceBaseline {
@@ -37,11 +35,11 @@ impl InstanceBaseline {
         Ok(())
     }
 
-    pub(crate) fn by_id(&self, class_id: i32) -> Option<std::cell::Ref<Vec<u8>>> {
+    pub(crate) fn by_id(&self, class_id: i32) -> Option<MutexGuard<Vec<u8>>> {
         self.data
             .get(class_id as usize)
             .and_then(|v| v.as_ref())
-            .map(|v| v.borrow())
+            .and_then(|v| v.lock().ok())
     }
 
     /// clear clears underlying storage, but this has no effect on the allocated capacity.
