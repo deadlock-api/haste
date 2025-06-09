@@ -1,6 +1,5 @@
 use std::io::{self, SeekFrom};
 
-use anyhow::Result;
 use prost::Message;
 use valveprotos::common::{
     CDemoFullPacket, CDemoPacket, CDemoStringTables, CsvcMsgCreateStringTable,
@@ -123,6 +122,8 @@ impl Context {
 }
 
 pub trait Visitor {
+    type Error: std::error::Error + Send + Sync + 'static;
+
     // TODO: include updated fields (list of field paths?)
     #[allow(unused_variables)]
     fn on_entity(
@@ -130,22 +131,32 @@ pub trait Visitor {
         ctx: &Context,
         delta_header: DeltaHeader,
         entity: &Entity,
-    ) -> Result<()> {
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     #[allow(unused_variables)]
-    fn on_cmd(&mut self, ctx: &Context, cmd_header: &CmdHeader, data: &[u8]) -> Result<()> {
+    fn on_cmd(
+        &mut self,
+        ctx: &Context,
+        cmd_header: &CmdHeader,
+        data: &[u8],
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     #[allow(unused_variables)]
-    fn on_packet(&mut self, ctx: &Context, packet_type: u32, data: &[u8]) -> Result<()> {
+    fn on_packet(
+        &mut self,
+        ctx: &Context,
+        packet_type: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
     #[allow(unused_variables)]
-    fn on_tick_end(&mut self, ctx: &Context) -> Result<()> {
+    fn on_tick_end(&mut self, ctx: &Context) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -218,7 +229,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                         ControlFlow::HandleCmd => {
                             self.handle_cmd(&cmd_header)?;
                             if self.ctx.prev_tick != self.ctx.tick {
-                                self.visitor.on_tick_end(&self.ctx)?;
+                                self.visitor.on_tick_end(&self.ctx).map_err(|e| {
+                                    anyhow::anyhow!("Failed to visit entity: {}", e)
+                                })?;
                             }
                         }
                         ControlFlow::SkipCmd => self.demo_stream.skip_cmd(&cmd_header)?,
@@ -297,7 +310,8 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                 let cmd_body = notnotself.demo_stream.read_cmd(cmd_header)?;
                 notnotself
                     .visitor
-                    .on_cmd(&notnotself.ctx, cmd_header, cmd_body)?;
+                    .on_cmd(&notnotself.ctx, cmd_header, cmd_body)
+                    .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
 
                 let mut cmd = D::decode_cmd_full_packet(cmd_body)?;
                 if has_full_packet_ahead {
@@ -310,7 +324,10 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                 }
                 notnotself.handle_cmd_full_packet(cmd)?;
                 // NOTE: there's absolutely no reason to check if tick changed because it changed.
-                notnotself.visitor.on_tick_end(&notnotself.ctx)?;
+                notnotself
+                    .visitor
+                    .on_tick_end(&notnotself.ctx)
+                    .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
 
                 did_handle_last_full_packet = !has_full_packet_ahead;
 
@@ -334,7 +351,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         // not read it, but skip, if unconsumed. note that to work temporary ownership of
         // demo_stream will need to be taken.
         let cmd_body = self.demo_stream.read_cmd(cmd_header)?;
-        self.visitor.on_cmd(&self.ctx, cmd_header, cmd_body)?;
+        self.visitor
+            .on_cmd(&self.ctx, cmd_header, cmd_body)
+            .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
 
         match cmd_header.cmd {
             EDemoCommands::DemPacket | EDemoCommands::DemSignonPacket => {
@@ -405,7 +424,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             br.read_bytes(buf)?;
             let buf: &_ = buf;
 
-            self.visitor.on_packet(&self.ctx, command, buf)?;
+            self.visitor
+                .on_packet(&self.ctx, command, buf)
+                .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
 
             match command {
                 c if c == SvcMessages::SvcCreateStringTable as u32 => {
@@ -516,7 +537,10 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 
     // NOTE: handle_msg_packet_entities is partially based on
     // ReadPacketEntities in engine/client.cpp
-    fn handle_svc_packet_entities(&mut self, msg: CsvcMsgPacketEntities) -> Result<(), ParseError> {
+    fn handle_svc_packet_entities(
+        &mut self,
+        msg: CsvcMsgPacketEntities,
+    ) -> anyhow::Result<(), ParseError> {
         // Entity classes and flattened serializers must be available before packet entities
         let entity_classes = self
             .ctx
@@ -562,7 +586,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                             index: created_entity_index,
                         },
                     )?;
-                    self.visitor.on_entity(&self.ctx, delta_header, entity)?;
+                    self.visitor
+                        .on_entity(&self.ctx, delta_header, entity)
+                        .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
                 }
                 DeltaHeader::DELETE => {
                     let entity = self
@@ -570,7 +596,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                         .entities
                         .handle_delete(entity_index)
                         .map_err(|e| anyhow::anyhow!("Failed to delete entity: {}", e))?;
-                    self.visitor.on_entity(&self.ctx, delta_header, &entity)?;
+                    self.visitor
+                        .on_entity(&self.ctx, delta_header, &entity)
+                        .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
                 }
                 DeltaHeader::UPDATE => {
                     // Update the entity and get its index for later retrieval
@@ -588,7 +616,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                             index: updated_entity_index,
                         },
                     )?;
-                    self.visitor.on_entity(&self.ctx, delta_header, entity)?;
+                    self.visitor
+                        .on_entity(&self.ctx, delta_header, entity)
+                        .map_err(|e| anyhow::anyhow!("Failed to visit entity: {}", e))?;
                 }
                 _ => {}
             }
@@ -597,7 +627,10 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         Ok(())
     }
 
-    fn handle_cmd_string_tables(&mut self, cmd: CDemoStringTables) -> Result<(), ParseError> {
+    fn handle_cmd_string_tables(
+        &mut self,
+        cmd: CDemoStringTables,
+    ) -> anyhow::Result<(), ParseError> {
         self.ctx.string_tables.do_full_update(cmd);
 
         // entity_classes is expected to be already assigned
@@ -619,7 +652,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         Ok(())
     }
 
-    fn handle_cmd_full_packet(&mut self, cmd: CDemoFullPacket) -> Result<()> {
+    fn handle_cmd_full_packet(&mut self, cmd: CDemoFullPacket) -> anyhow::Result<()> {
         if let Some(string_table) = cmd.string_table {
             self.handle_cmd_string_tables(string_table)?;
         }
@@ -648,7 +681,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 }
 
 pub struct NopVisitor;
-impl Visitor for NopVisitor {}
+impl Visitor for NopVisitor {
+    type Error = std::convert::Infallible;
+}
 
 impl<D: DemoStream> Parser<D, NopVisitor> {
     pub fn from_stream(demo_stream: D) -> Result<Self, DemoHeaderError> {
