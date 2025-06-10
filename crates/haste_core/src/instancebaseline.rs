@@ -35,7 +35,7 @@ impl InstanceBaseline {
         Ok(())
     }
 
-    pub(crate) fn by_id(&self, class_id: i32) -> Option<MutexGuard<Vec<u8>>> {
+    pub(crate) fn by_id(&self, class_id: i32) -> Option<MutexGuard<'_, Vec<u8>>> {
         self.data
             .get(class_id as usize)
             .and_then(|v| v.as_ref())
