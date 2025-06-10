@@ -510,10 +510,12 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         debug_assert!(msg.table_id.is_some(), "invalid table id");
         let table_id = msg.table_id() as usize;
 
-        debug_assert!(
-            self.ctx.string_tables.has_table(table_id),
-            "tryting to update non-existent table"
-        );
+        if !self.ctx.string_tables.has_table(table_id) {
+            return Err(ParseError::StringTableNotFound {
+                table_id: table_id as i32,
+            });
+        }
+
         // table_id was validated by has_table() check above
         let string_table = self.ctx.string_tables.get_table_mut(table_id).ok_or(
             ParseError::StringTableNotFound {
