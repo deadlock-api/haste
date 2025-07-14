@@ -1,6 +1,7 @@
-use std::cell::UnsafeCell;
 use std::num::ParseIntError;
-use std::rc::Rc;
+use std::sync::Arc;
+
+use sync_unsafe_cell::SyncUnsafeCell;
 
 use crate::stringtables::StringTable;
 
@@ -8,7 +9,7 @@ pub(crate) const INSTANCE_BASELINE_TABLE_NAME: &str = "instancebaseline";
 
 #[derive(Default)]
 pub(crate) struct InstanceBaseline {
-    data: Vec<Option<Rc<UnsafeCell<Vec<u8>>>>>,
+    data: Vec<Option<Arc<SyncUnsafeCell<Vec<u8>>>>>,
 }
 
 impl InstanceBaseline {

@@ -1,12 +1,12 @@
-use std::cell::UnsafeCell;
 use std::hash::BuildHasherDefault;
 use std::mem::MaybeUninit;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use dungers::bitbuf::BitError;
 use hashbrown::HashMap;
 use nohash::NoHashHasher;
 use thiserror::Error;
+use sync_unsafe_cell::SyncUnsafeCell;
 use valveprotos::common::{CDemoStringTables, c_demo_string_tables};
 
 use crate::bitreader::BitReader;
@@ -50,10 +50,9 @@ pub enum StringTableError {
 #[derive(Debug)]
 pub struct StringTableItem {
     pub string: Option<Vec<u8>>,
-    pub user_data: Option<Rc<UnsafeCell<Vec<u8>>>>,
+    pub user_data: Option<Arc<SyncUnsafeCell<Vec<u8>>>>,
 }
 
-#[derive(Debug)]
 pub struct StringTable {
     name: Box<str>,
     user_data_fixed_size: bool,
@@ -241,7 +240,8 @@ impl StringTable {
                             dst.clone_from_slice(src);
                         }
                     } else {
-                        entry.user_data = user_data.map(|v| Rc::new(UnsafeCell::new(v.to_vec())));
+                        entry.user_data =
+                            user_data.map(|v| Arc::new(SyncUnsafeCell::new(v.to_vec())));
                     }
                 })
                 .or_insert_with(|| StringTableItem {
@@ -250,7 +250,7 @@ impl StringTable {
                         dst.extend_from_slice(src);
                         dst
                     }),
-                    user_data: user_data.map(|v| Rc::new(UnsafeCell::new(v.to_vec()))),
+                    user_data: user_data.map(|v| Arc::new(SyncUnsafeCell::new(v.to_vec()))),
                 });
         }
 
@@ -276,14 +276,14 @@ impl StringTable {
                     existing.user_data = incoming
                         .data
                         .as_ref()
-                        .map(|data| Rc::new(UnsafeCell::new(data.clone())))
+                        .map(|data| Arc::new(SyncUnsafeCell::new(data.clone())))
                 })
                 .or_insert_with(|| StringTableItem {
                     string: incoming.str.as_ref().map(|v| v.as_bytes().to_vec()),
                     user_data: incoming
                         .data
                         .as_ref()
-                        .map(|data| Rc::new(UnsafeCell::new(data.clone()))),
+                        .map(|data| Arc::new(SyncUnsafeCell::new(data.clone()))),
                 });
         }
     }

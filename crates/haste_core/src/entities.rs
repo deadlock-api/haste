@@ -1,6 +1,6 @@
 use std::fmt::{self, Binary};
 use std::hash::BuildHasherDefault;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use dungers::bitbuf::BitError;
 use hashbrown::HashMap;
@@ -210,7 +210,7 @@ struct EntityField {
 pub struct Entity {
     index: i32,
     fields: HashMap<u64, EntityField, BuildHasherDefault<NoHashHasher<u64>>>,
-    serializer: Rc<FlattenedSerializer>,
+    serializer: Arc<FlattenedSerializer>,
 }
 
 impl Entity {

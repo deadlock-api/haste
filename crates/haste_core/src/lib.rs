@@ -59,7 +59,7 @@ pub use valveprotos;
 // but that stuff can be faster. this probably will also change how entity field lookups need to be
 // performed.
 
-// TODO(blukai): get rid of stupid fat pointers (Rc) in flattened serializers. do the gen vec
+// TODO(blukai): get rid of stupid fat pointers (Arc) in flattened serializers. do the gen vec
 // thing, but without gen part.
 
 // NOTE(blukai): don't overuse/overrely on Result. it slows things down very significantly on hot
