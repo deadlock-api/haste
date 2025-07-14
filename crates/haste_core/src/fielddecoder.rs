@@ -50,7 +50,7 @@ impl Default for FieldDecodeContext {
 
 // TODO(blukai): try to not box internal decoders (for example u64).
 
-pub(crate) trait FieldDecode: DynClone + Debug {
+pub(crate) trait FieldDecode: DynClone + Debug + Send + Sync {
     fn decode(
         &self,
         ctx: &mut FieldDecodeContext,
@@ -77,7 +77,7 @@ impl FieldDecode for InvalidDecoder {
 
 // ----
 
-trait InternalFieldDecode<T>: DynClone + Debug {
+trait InternalFieldDecode<T>: DynClone + Debug + Send + Sync {
     fn decode(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<T, BitError>;
 }
 
