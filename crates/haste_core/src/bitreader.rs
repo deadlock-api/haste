@@ -249,7 +249,9 @@ impl<'a> BitReader<'a> {
     // Returns the number of characters left in out when the routine is complete (this will never
     // exceed buf.len()-1).
     pub fn read_string(&mut self, buf: &mut [u8], line: bool) -> Result<usize, BitError> {
-        assert!(!buf.is_empty());
+        if buf.is_empty() {
+            return Err(BitError::BufferTooSmall);
+        }
 
         let mut too_small = false;
         let mut num_chars = 0;
@@ -268,16 +270,21 @@ impl<'a> BitReader<'a> {
         }
 
         // make sure it's null-terminated.
-        assert!(num_chars < buf.len());
+        if num_chars >= buf.len() {
+            return Err(BitError::BufferTooSmall);
+        }
         buf[num_chars] = 0;
 
         // did it fit?
-        assert!(!too_small);
+        if too_small {
+            return Err(BitError::BufferTooSmall);
+        }
 
         Ok(num_chars)
     }
 
     pub fn read_ubitvarfp(&mut self) -> Result<u32, BitError> {
+        #[allow(clippy::same_functions_in_if_condition)]
         let ret = if self.read_bool()? {
             self.read_ubit64(2)?
         } else if self.read_bool()? {

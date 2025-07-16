@@ -99,12 +99,12 @@ fn assign_range_multiplier(bit_count: i32, range: f64) -> Result<f32, InvalidRan
     let mut high_low_mul = if close_enough(range as f32, 0.0, EQUAL_EPSILON) {
         high_value as f32
     } else {
-        (high_value as f64 / range) as f32
+        (f64::from(high_value) / range) as f32
     };
 
     // If the precision is messing us up, then adjust it so it won't.
-    if (high_low_mul as f64 * range) as u32 > high_value
-        || (high_low_mul as f64 * range) > high_value as f64
+    if (f64::from(high_low_mul) * range) as u32 > high_value
+        || (f64::from(high_low_mul) * range) > f64::from(high_value)
     {
         // Squeeze it down smaller and smaller until it's going to produce an
         // integer in the valid range when given the highest value.
@@ -114,12 +114,12 @@ fn assign_range_multiplier(bit_count: i32, range: f64) -> Result<f32, InvalidRan
             // fHighLowMul = (float)( iHighValue / range ) iHighValue is
             // unsigned long and range is a double -> the intermediate result
             // during the division will be a double due to type promotion in cpp.
-            high_low_mul = (high_value as f64 / range) as f32 * MULTIPLIERS[i];
+            high_low_mul = (f64::from(high_value) / range) as f32 * MULTIPLIERS[i];
 
             // (unsigned long)(fHighLowMul * range) > iHighValue ||
             //   (fHighLowMul * range) > (double)iHighValue
-            if ((high_low_mul as f64 * range) as u32 > high_value)
-                || ((high_low_mul as f64 * range) > high_value as f64)
+            if ((f64::from(high_low_mul) * range) as u32 > high_value)
+                || ((f64::from(high_low_mul) * range) > f64::from(high_value))
             {
                 i += 1;
             } else {
@@ -211,14 +211,18 @@ impl QuantizedFloat {
         }
 
         let range = qf.high_value - qf.low_value;
-        qf.high_low_mul = assign_range_multiplier(qf.bit_count, range as f64)?;
+        qf.high_low_mul = assign_range_multiplier(qf.bit_count, f64::from(range))?;
         qf.decode_mul = 1.0 / (steps - 1) as f32;
 
         // Remove unessecary flags
-        if (qf.encode_flags & QFE_ROUNDDOWN) != 0 && qf.quantize(qf.low_value) == qf.low_value {
+        if (qf.encode_flags & QFE_ROUNDDOWN) != 0
+            && (qf.quantize(qf.low_value) - qf.low_value).abs() < 0.0001
+        {
             qf.encode_flags &= !QFE_ROUNDDOWN;
         }
-        if (qf.encode_flags & QFE_ROUNDUP) != 0 && qf.quantize(qf.high_value) == qf.high_value {
+        if (qf.encode_flags & QFE_ROUNDUP) != 0
+            && (qf.quantize(qf.high_value) - qf.high_value).abs() < 0.0001
+        {
             qf.encode_flags &= !QFE_ROUNDUP;
         }
         if (qf.encode_flags & QFE_ENCODE_ZERO_EXACTLY) != 0 && qf.quantize(0.0) == 0.0 {

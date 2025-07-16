@@ -79,7 +79,7 @@ pub trait DemoStream {
     fn read_cmd_header(&mut self) -> Result<CmdHeader, ReadCmdHeaderError>;
 
     fn unread_cmd_header(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
-        self.seek(SeekFrom::Current(-(cmd_header.size as i64)))
+        self.seek(SeekFrom::Current(-i64::from(cmd_header.size)))
             .map(|_| ())
     }
 
@@ -113,7 +113,7 @@ pub trait DemoStream {
     // IsCompressed (flag)
 
     fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
-        self.seek(SeekFrom::Current(cmd_header.body_size as i64))
+        self.seek(SeekFrom::Current(i64::from(cmd_header.body_size)))
             .map(|_| ())
     }
 

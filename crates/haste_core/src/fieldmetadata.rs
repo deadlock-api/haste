@@ -1,7 +1,6 @@
 use crate::fielddecoder::{
-    BoolDecoder, F32Decoder, FieldDecode, FieldDecoderConstructionError, I64Decoder,
-    InvalidDecoder, QAngleDecoder, StringDecoder, U64Decoder, Vector2Decoder, Vector3Decoder,
-    Vector4Decoder,
+    BoolDecoder, DecoderError, F32Decoder, FieldDecode, I64Decoder, InvalidDecoder, QAngleDecoder,
+    StringDecoder, U64Decoder, Vector2Decoder, Vector3Decoder, Vector4Decoder,
 };
 use crate::flattenedserializers::FlattenedSerializerField;
 use crate::vartype::{self, Expr, Lit};
@@ -11,9 +10,11 @@ pub enum FieldMetadataError {
     #[error(transparent)]
     VarTypeParseError(#[from] vartype::Error),
     #[error(transparent)]
-    FieldDecoderConstructionError(#[from] FieldDecoderConstructionError),
+    FieldDecoderConstructionError(#[from] DecoderError),
     #[error("unknown array length ident: {0}")]
     UnknownArrayLengthIdent(String),
+    #[error("field not found")]
+    FieldNotFound,
 }
 
 // NOTE: Clone is derived because FlattenedSerializerField needs to be clonable.
@@ -24,7 +25,7 @@ pub(crate) enum FieldSpecialDescriptor {
     },
 
     /// this variant differs from [`FieldSpecialDescriptor::DynamicSerializerArray`] in that it can
-    /// contain primitive values (e.g., u8, bool) and more complex types (e.g., Vector4D, Vector),
+    /// contain primitive values (e.g., u8, bool) and more complex types (e.g., `Vector4D`, Vector),
     /// but it can not contain other serializers.
     ///
     /// example entity fields:
@@ -119,6 +120,7 @@ fn visit_ident(
         };
     }
 
+    #[allow(clippy::match_same_arms)]
     match ident {
         // primitives
         "int8" => non_special!(I64Decoder),
@@ -161,12 +163,7 @@ fn visit_ident(
         "Vector4D" => non_special!(Vector4Decoder::new(field)?),
 
         // exceptional specials xd
-        "m_SpeechBubbles" => Ok(FieldMetadata {
-            special_descriptor: Some(FieldSpecialDescriptor::DynamicSerializerArray),
-            decoder: Box::<U64Decoder>::default(),
-        }),
-        // https://github.com/SteamDatabase/GameTracking-CS2/blob/6b3bf6ad44266e3ee4440a0b9b2fee1268812840/game/core/tools/demoinfo2/demoinfo2.txt#L155C83-L155C111
-        "DOTA_CombatLogQueryProgress" => Ok(FieldMetadata {
+        "m_SpeechBubbles" | "DOTA_CombatLogQueryProgress" => Ok(FieldMetadata {
             special_descriptor: Some(FieldSpecialDescriptor::DynamicSerializerArray),
             decoder: Box::<U64Decoder>::default(),
         }),
@@ -180,7 +177,7 @@ fn visit_ident(
 }
 
 fn visit_template(
-    expr: Expr,
+    expr: &Expr,
     arg: Expr,
     field: &FlattenedSerializerField,
 ) -> Result<FieldMetadata, FieldMetadataError> {
@@ -190,7 +187,7 @@ fn visit_template(
 
     if matches!(
         ident,
-        "CNetworkUtlVectorBase" | "CUtlVectorEmbeddedNetworkVar" | "CUtlVector"
+        &"CNetworkUtlVectorBase" | &"CUtlVectorEmbeddedNetworkVar" | &"CUtlVector"
     ) {
         if field.field_serializer_name.is_some() {
             return Ok(FieldMetadata {
@@ -212,16 +209,16 @@ fn visit_template(
 
 fn visit_array(
     expr: Expr,
-    len: Expr,
+    len: &Expr,
     field: &FlattenedSerializerField,
 ) -> Result<FieldMetadata, FieldMetadataError> {
-    if let Expr::Ident(ident) = expr {
-        if ident == "char" {
-            return Ok(FieldMetadata {
-                special_descriptor: None,
-                decoder: Box::<StringDecoder>::default(),
-            });
-        }
+    if let Expr::Ident(ident) = expr
+        && ident == "char"
+    {
+        return Ok(FieldMetadata {
+            special_descriptor: None,
+            decoder: Box::<StringDecoder>::default(),
+        });
     }
 
     let length = match len {
@@ -229,12 +226,12 @@ fn visit_array(
             // NOTE: it seems like this was changed from array to vec, see
             // https://github.com/SteamDatabase/GameTracking-CS2/blob/6b3bf6ad44266e3ee4440a0b9b2fee1268812840/game/core/tools/demoinfo2/demoinfo2.txt#L160
             // TODO: test ability draft game
-            "MAX_ABILITY_DRAFT_ABILITIES" => Ok(48),
+            &"MAX_ABILITY_DRAFT_ABILITIES" => Ok(48),
             _ => Err(FieldMetadataError::UnknownArrayLengthIdent(
-                ident.to_owned(),
+                (*ident).to_owned(),
             )),
         },
-        Expr::Lit(Lit::Num(length)) => Ok(length),
+        Expr::Lit(Lit::Num(length)) => Ok(*length),
         _ => unreachable!(),
     }?;
 
@@ -258,8 +255,8 @@ fn visit_any(
 ) -> Result<FieldMetadata, FieldMetadataError> {
     match expr {
         Expr::Ident(ident) => visit_ident(ident, field),
-        Expr::Template { expr, arg } => visit_template(*expr, *arg, field),
-        Expr::Array { expr, len } => visit_array(*expr, *len, field),
+        Expr::Template { expr, arg } => visit_template(&expr, *arg, field),
+        Expr::Array { expr, len } => visit_array(*expr, &len, field),
         Expr::Pointer(_) => visit_pointer(),
         _ => unreachable!(),
     }
@@ -267,8 +264,8 @@ fn visit_any(
 
 pub(crate) fn get_field_metadata(
     field: &FlattenedSerializerField,
-    var_type: &String,
+    var_type: &str,
 ) -> Result<FieldMetadata, FieldMetadataError> {
-    let expr = vartype::parse(var_type.as_str())?;
+    let expr = vartype::parse(var_type)?;
     visit_any(expr, field)
 }

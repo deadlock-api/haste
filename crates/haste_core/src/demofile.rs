@@ -1,8 +1,8 @@
-use std::io::{self, Read, Seek, SeekFrom};
-
+use anyhow::Context;
 use dungers::varint;
 use prost;
 use prost::Message;
+use std::io::{self, Read, Seek, SeekFrom};
 use valveprotos::common::{
     CDemoClassInfo, CDemoFileInfo, CDemoFullPacket, CDemoPacket, CDemoSendTables, EDemoCommands,
 };
@@ -100,7 +100,7 @@ impl<R: Read + Seek> DemoFile<R> {
             self.seek(SeekFrom::Start(backup))?;
         }
 
-        Ok(self.file_info.as_ref().expect("file info have been read"))
+        self.file_info.as_ref().context("file info not set")
     }
 }
 
@@ -127,10 +127,10 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
     // ----
 
     fn read_cmd_header(&mut self) -> Result<CmdHeader, ReadCmdHeaderError> {
+        const DEM_IS_COMPRESSED: u32 = EDemoCommands::DemIsCompressed as u32;
         let (cmd, cmd_n, body_compressed) = {
             let (cmd_raw, n) = varint::read_uvarint32(&mut self.rdr)?;
 
-            const DEM_IS_COMPRESSED: u32 = EDemoCommands::DemIsCompressed as u32;
             let body_compressed = cmd_raw & DEM_IS_COMPRESSED == DEM_IS_COMPRESSED;
 
             let cmd = if body_compressed {
@@ -214,6 +214,7 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
     }
 
     fn total_ticks(&mut self) -> Result<i32, anyhow::Error> {
-        self.file_info().map(|file_info| file_info.playback_ticks())
+        self.file_info()
+            .map(valveprotos::common::CDemoFileInfo::playback_ticks)
     }
 }

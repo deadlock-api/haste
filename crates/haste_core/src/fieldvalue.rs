@@ -105,8 +105,8 @@ impl TryInto<String> for FieldValue {
 
 macro_rules! impl_debug {
     ($($variant:ident),+) => {
-        impl std::fmt::Debug for FieldValue {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        impl core::fmt::Debug for FieldValue {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 match self {
                     $(Self::$variant(value) => f.debug_tuple(stringify!($variant)).field(value).finish(),)+
                 }
@@ -129,8 +129,8 @@ impl_debug! {
 
 macro_rules! impl_display {
     ($($variant:ident),+) => {
-        impl std::fmt::Display for FieldValue {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        impl core::fmt::Display for FieldValue {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 match self {
                     $(Self::$variant(value) => write!(f, "{:?}", value),)+
                 }

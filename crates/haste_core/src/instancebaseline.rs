@@ -1,4 +1,4 @@
-use std::num::ParseIntError;
+use core::num::ParseIntError;
 use std::sync::Arc;
 
 use sync_unsafe_cell::SyncUnsafeCell;
@@ -23,13 +23,13 @@ impl InstanceBaseline {
         }
 
         for (_entity_index, item) in string_table.items() {
-            // SAFETY: in normal circumbstances this is safe; it is expected for
-            // instancebaseline's string to be convertable to number, if it
-            // cannot be converted to number - fail loudly!
-            let string =
-                unsafe { std::str::from_utf8_unchecked(item.string.as_ref().unwrap_unchecked()) };
-            let class_id = string.parse::<i32>()?;
-            self.data[class_id as usize] = item.user_data.clone();
+            let data = item.string.as_ref();
+            if let Some(data) = data
+                && let Ok(string) = core::str::from_utf8(data)
+            {
+                let class_id = string.parse::<i32>()?;
+                self.data[class_id as usize].clone_from(&item.user_data);
+            }
         }
         Ok(())
     }

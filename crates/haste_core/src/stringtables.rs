@@ -1,12 +1,11 @@
-use std::hash::BuildHasherDefault;
-use std::mem::MaybeUninit;
+use core::hash::BuildHasherDefault;
 use std::sync::Arc;
 
 use dungers::bitbuf::BitError;
 use hashbrown::HashMap;
 use nohash::NoHashHasher;
-use thiserror::Error;
 use sync_unsafe_cell::SyncUnsafeCell;
+use thiserror::Error;
 use valveprotos::common::{CDemoStringTables, c_demo_string_tables};
 
 use crate::bitreader::BitReader;
@@ -20,19 +19,22 @@ const HISTORY_BITMASK: usize = HISTORY_SIZE - 1;
 const MAX_STRING_BITS: usize = 5;
 const MAX_STRING_SIZE: usize = 1 << MAX_STRING_BITS;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StringHistoryEntry {
     string: [u8; MAX_STRING_SIZE],
 }
 
 impl StringHistoryEntry {
-    #[inline]
-    unsafe fn new_uninit() -> Self {
+    fn new() -> Self {
         Self {
-            // NOTE: the trick is to use this correctly xd
-            #[allow(invalid_value)]
-            string: MaybeUninit::uninit().assume_init(),
+            string: [0; MAX_STRING_SIZE],
         }
+    }
+}
+
+impl Default for StringHistoryEntry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -78,11 +80,8 @@ impl StringTable {
         flags: i32,
         using_varint_bitcounts: bool,
     ) -> Self {
-        #[inline]
-        unsafe fn make_vec<T>(size: usize) -> Vec<T> {
-            let mut vec = Vec::with_capacity(size);
-            vec.set_len(size);
-            vec
+        fn make_vec<T: Default + Clone>(size: usize) -> Vec<T> {
+            vec![T::default(); size]
         }
 
         Self {
@@ -94,10 +93,10 @@ impl StringTable {
             using_varint_bitcounts,
             items: HashMap::with_capacity_and_hasher(1024, BuildHasherDefault::default()),
 
-            history: unsafe { make_vec(HISTORY_SIZE) },
-            string_buf: unsafe { make_vec(1024) },
-            user_data_buf: unsafe { make_vec(MAX_USERDATA_SIZE) },
-            user_data_uncompressed_buf: unsafe { make_vec(MAX_USERDATA_SIZE) },
+            history: make_vec(HISTORY_SIZE),
+            string_buf: make_vec(1024),
+            user_data_buf: make_vec(MAX_USERDATA_SIZE),
+            user_data_uncompressed_buf: make_vec(MAX_USERDATA_SIZE),
         }
     }
 
@@ -169,7 +168,7 @@ impl StringTable {
                     let mut history_delta_zero = 0;
                     if history_delta_index > HISTORY_SIZE {
                         history_delta_zero = history_delta_index & HISTORY_BITMASK;
-                    };
+                    }
 
                     let index =
                         (history_delta_zero + br.read_ubit64(5)? as usize) & HISTORY_BITMASK;
@@ -183,7 +182,7 @@ impl StringTable {
                     size += br.read_string(string_buf, false)?;
                 }
 
-                let mut she = unsafe { StringHistoryEntry::new_uninit() };
+                let mut she = StringHistoryEntry::default();
                 she.string.copy_from_slice(&string_buf[..MAX_STRING_SIZE]);
 
                 history[history_delta_index & HISTORY_BITMASK] = she;
@@ -235,6 +234,7 @@ impl StringTable {
                 .and_modify(|entry| {
                     if let Some(dst_container) = entry.user_data.as_ref() {
                         if let Some(src) = user_data {
+                            #[allow(unsafe_code)]
                             let dst = unsafe { dst_container.get().as_mut().unwrap_unchecked() };
                             dst.resize(src.len(), 0);
                             dst.clone_from_slice(src);
@@ -276,7 +276,7 @@ impl StringTable {
                     existing.user_data = incoming
                         .data
                         .as_ref()
-                        .map(|data| Arc::new(SyncUnsafeCell::new(data.clone())))
+                        .map(|data| Arc::new(SyncUnsafeCell::new(data.clone())));
                 })
                 .or_insert_with(|| StringTableItem {
                     string: incoming.str.as_ref().map(|v| v.as_bytes().to_vec()),
@@ -298,7 +298,7 @@ impl StringTable {
         self.name.as_ref()
     }
 
-    pub fn items(&self) -> impl Iterator<Item=(&i32, &StringTableItem)> {
+    pub fn items(&self) -> impl Iterator<Item = (&i32, &StringTableItem)> {
         self.items.iter()
     }
 
@@ -344,7 +344,7 @@ impl StringTableContainer {
         &mut self.tables[len]
     }
 
-    pub fn do_full_update(&mut self, cmd: CDemoStringTables) {
+    pub fn do_full_update(&mut self, cmd: &CDemoStringTables) {
         for incoming in &cmd.tables {
             if let Some(existing) = self.find_table_mut(incoming.table_name()) {
                 existing.do_full_update(incoming);
@@ -411,7 +411,6 @@ impl StringTableContainer {
     // void RestoreTick( int tick );
 
     // TODO: rename to iter?
-    #[inline]
     pub fn tables(&self) -> impl Iterator<Item = &StringTable> {
         self.tables.iter()
     }

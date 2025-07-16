@@ -14,7 +14,8 @@ pub struct EntityClasses {
 }
 
 impl EntityClasses {
-    pub fn parse(cmd: CDemoClassInfo) -> Self {
+    #[must_use]
+    pub fn parse(cmd: &CDemoClassInfo) -> Self {
         let class_count = cmd.classes.len();
 
         // bits is the number of bits to read for entity classes. stolen from
@@ -24,13 +25,8 @@ impl EntityClasses {
         let class_infos: Vec<ClassInfo> = cmd
             .classes
             .iter()
-            .enumerate()
-            .map(|(i, class)| {
-                let class_id = class.class_id() as usize;
-                assert_eq!(class_id, i, "invliad class id");
-                ClassInfo {
-                    network_name_hash: fxhash::hash_bytes(class.network_name().as_bytes()),
-                }
+            .map(|cls| ClassInfo {
+                network_name_hash: fxhash::hash_bytes(cls.network_name().as_bytes()),
             })
             .collect();
 
@@ -41,8 +37,8 @@ impl EntityClasses {
         }
     }
 
-    #[inline]
-    pub unsafe fn by_id_unckecked(&self, class_id: i32) -> &ClassInfo {
-        self.class_infos.get_unchecked(class_id as usize)
+    #[must_use]
+    pub fn by_id(&self, class_id: i32) -> Option<&ClassInfo> {
+        self.class_infos.get(class_id as usize)
     }
 }

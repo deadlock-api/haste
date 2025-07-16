@@ -1,9 +1,8 @@
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::fmt::Debug;
-
+use core::cmp::Ordering;
+use core::fmt::Debug;
 use dungers::bitbuf::BitError;
-use lazy_static::lazy_static;
+use std::collections::BinaryHeap;
+use std::sync::LazyLock;
 
 use crate::bitreader::BitReader;
 
@@ -39,7 +38,7 @@ impl FieldPath {
     // ops
 
     fn inc_at(&mut self, i: usize, v: i32) {
-        self.data[i] = ((self.data[i] as i32 + v) & 0xFF) as u8;
+        self.data[i] = ((i32::from(self.data[i]) + v) & 0xFF) as u8;
     }
 
     fn inc_last(&mut self, v: i32) {
@@ -58,13 +57,6 @@ impl FieldPath {
         }
     }
 
-    // internal apis
-
-    #[inline]
-    pub(crate) unsafe fn get_unchecked(&self, index: usize) -> usize {
-        *self.data.get_unchecked(index) as usize
-    }
-
     // public api
 
     // NOTE: using this method can hurt performance when used in critical code paths. use the
@@ -79,7 +71,7 @@ impl FieldPath {
         self.last
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=&u8> {
+    pub fn iter(&self) -> impl Iterator<Item = &u8> {
         self.data.iter().take(self.last + 1)
     }
 }
@@ -87,24 +79,28 @@ impl FieldPath {
 type FieldOp = fn(&mut FieldPath, &mut BitReader) -> Result<(), BitError>;
 
 // PlusOne
+#[allow(clippy::unnecessary_wraps)]
 fn plus_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(1);
     Ok(())
 }
 
 // PlusTwo
+#[allow(clippy::unnecessary_wraps)]
 fn plus_two(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(2);
     Ok(())
 }
 
 // PlusThree
+#[allow(clippy::unnecessary_wraps)]
 fn plus_three(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(3);
     Ok(())
 }
 
 // PlusFour
+#[allow(clippy::unnecessary_wraps)]
 fn plus_four(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(4);
     Ok(())
@@ -117,6 +113,7 @@ fn plus_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
 }
 
 // PushOneLeftDeltaZeroRightZero
+#[allow(clippy::unnecessary_wraps)]
 fn push_one_left_delta_zero_right_zero(
     fp: &mut FieldPath,
     _br: &mut BitReader,
@@ -135,6 +132,7 @@ fn push_one_left_delta_zero_right_non_zero(
 }
 
 // PushOneLeftDeltaOneRightZero
+#[allow(clippy::unnecessary_wraps)]
 fn push_one_left_delta_one_right_zero(
     fp: &mut FieldPath,
     _br: &mut BitReader,
@@ -320,6 +318,7 @@ fn push_n_and_non_topographical(fp: &mut FieldPath, br: &mut BitReader) -> Resul
 }
 
 // PopOnePlusOne
+#[allow(clippy::unnecessary_wraps)]
 fn pop_one_plus_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.pop(1);
     fp.inc_last(1);
@@ -334,6 +333,7 @@ fn pop_one_plus_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError
 }
 
 // PopAllButOnePlusOne
+#[allow(clippy::unnecessary_wraps)]
 fn pop_all_but_one_plus_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.pop(fp.last);
     fp.inc_last(1);
@@ -403,6 +403,7 @@ fn non_topo_complex(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitErr
 }
 
 // NonTopoPenultimatePluseOne
+#[allow(clippy::unnecessary_wraps)]
 fn non_topo_penultimate_pluse_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_at(fp.last - 1, 1);
     Ok(())
@@ -419,6 +420,7 @@ fn non_topo_complex_pack4_bits(fp: &mut FieldPath, br: &mut BitReader) -> Result
 }
 
 // FieldPathEncodeFinish
+#[allow(clippy::unnecessary_wraps)]
 fn field_path_encode_finish(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     // NOCOMMIT
     fp.finished = true;
@@ -616,28 +618,26 @@ enum Node<T: Debug> {
 impl<T: Debug> Node<T> {
     fn weight(&self) -> usize {
         match self {
-            Self::Leaf { weight, .. } => *weight,
-            Self::Branch { weight, .. } => *weight,
+            Self::Leaf { weight, .. } | Self::Branch { weight, .. } => *weight,
         }
     }
 
     fn num(&self) -> usize {
         match self {
-            Self::Leaf { num, .. } => *num,
-            Self::Branch { num, .. } => *num,
+            Self::Leaf { num, .. } | Self::Branch { num, .. } => *num,
         }
     }
 
     fn unwrap_left_branch(&self) -> &Self {
         match self {
-            Self::Branch { ref left, .. } => left,
+            Self::Branch { left, .. } => left,
             _ => unreachable!(),
         }
     }
 
     fn unwrap_right_branch(&self) -> &Self {
         match self {
-            Self::Branch { ref right, .. } => right,
+            Self::Branch { right, .. } => right,
             _ => unreachable!(),
         }
     }
@@ -673,7 +673,7 @@ fn build_fieldop_hierarchy() -> Node<FieldOp> {
     // valve's huffman-tree uses a variation which takes the node number into account
     let mut num = 0;
 
-    for fod in FIELDOP_DESCRIPTORS.iter() {
+    for fod in FIELDOP_DESCRIPTORS {
         bh.push(Node::Leaf {
             weight: fod.weight,
             num,
@@ -697,9 +697,7 @@ fn build_fieldop_hierarchy() -> Node<FieldOp> {
     bh.pop().unwrap()
 }
 
-lazy_static! {
-    static ref FIELDOP_HIERARCHY: Node<FieldOp> = build_fieldop_hierarchy();
-}
+static FIELDOP_HIERARCHY: LazyLock<Node<FieldOp>> = LazyLock::new(|| build_fieldop_hierarchy());
 
 pub(crate) fn read_field_paths(
     br: &mut BitReader,

@@ -1,7 +1,7 @@
-use std::future::Future;
-use std::io::{self, SeekFrom};
-
+use anyhow::bail;
+use core::future::Future;
 use prost::Message;
+use std::io::{self, SeekFrom};
 use valveprotos::common::{
     CDemoFullPacket, CDemoPacket, CDemoStringTables, CsvcMsgCreateStringTable,
     CsvcMsgPacketEntities, CsvcMsgServerInfo, CsvcMsgUpdateStringTable, EDemoCommands, SvcMessages,
@@ -91,7 +91,7 @@ impl Context {
 }
 
 pub trait Visitor {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: core::error::Error + Send + Sync + 'static;
 
     // TODO: include updated fields (list of field paths?)
     #[allow(unused_variables)]
@@ -133,7 +133,7 @@ pub trait Visitor {
     }
 }
 
-/// ControlFlow indicates the desired behavior of the run loop.
+/// `ControlFlow` indicates the desired behavior of the run loop.
 enum ControlFlow {
     /// indicates that the command should be handled by the parser.
     HandleCmd,
@@ -349,7 +349,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                 }
 
                 let cmd = D::decode_cmd_class_info(cmd_body)?;
-                self.ctx.entity_classes = Some(EntityClasses::parse(cmd));
+                self.ctx.entity_classes = Some(EntityClasses::parse(&cmd));
 
                 // NOTE: DemClassInfo message becomes available after
                 // SvcCreateStringTable(which has instancebaselines). to know
@@ -362,8 +362,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                     .find_table(INSTANCE_BASELINE_TABLE_NAME)
                 {
                     // SAFETY: entity_classes value was assigned above ^.
-                    let entity_classes =
-                        unsafe { self.ctx.entity_classes.as_ref().unwrap_unchecked() };
+                    let Some(entity_classes) = self.ctx.entity_classes.as_ref() else {
+                        bail!("entity not found")
+                    };
                     self.ctx
                         .instance_baseline
                         .update(string_table, entity_classes.classes)?;
@@ -395,12 +396,12 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             match command {
                 c if c == SvcMessages::SvcCreateStringTable as u32 => {
                     let msg = CsvcMsgCreateStringTable::decode(buf)?;
-                    self.handle_svc_create_string_table(msg)?;
+                    self.handle_svc_create_string_table(&msg)?;
                 }
 
                 c if c == SvcMessages::SvcUpdateStringTable as u32 => {
                     let msg = CsvcMsgUpdateStringTable::decode(buf)?;
-                    self.handle_svc_update_string_table(msg)?;
+                    self.handle_svc_update_string_table(&msg)?;
                 }
 
                 c if c == SvcMessages::SvcPacketEntities as u32 => {
@@ -434,7 +435,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 
     fn handle_svc_create_string_table(
         &mut self,
-        msg: CsvcMsgCreateStringTable,
+        msg: &CsvcMsgCreateStringTable,
     ) -> anyhow::Result<()> {
         let string_table = self.ctx.string_tables.create_string_table_mut(
             msg.name(),
@@ -458,12 +459,12 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         string_table.parse_update(&mut br, msg.num_entries())?;
         br.is_overflowed()?;
 
-        if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME) {
-            if let Some(entity_classes) = self.ctx.entity_classes.as_ref() {
-                self.ctx
-                    .instance_baseline
-                    .update(string_table, entity_classes.classes)?;
-            }
+        if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME)
+            && let Some(entity_classes) = self.ctx.entity_classes.as_ref()
+        {
+            self.ctx
+                .instance_baseline
+                .update(string_table, entity_classes.classes)?;
         }
 
         Ok(())
@@ -471,32 +472,29 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 
     fn handle_svc_update_string_table(
         &mut self,
-        msg: CsvcMsgUpdateStringTable,
+        msg: &CsvcMsgUpdateStringTable,
     ) -> anyhow::Result<()> {
         debug_assert!(msg.table_id.is_some(), "invalid table id");
         let table_id = msg.table_id() as usize;
 
         debug_assert!(
             self.ctx.string_tables.has_table(table_id),
-            "tryting to update non-existent table"
+            "trying to update non-existent table"
         );
-        let string_table = unsafe {
-            self.ctx
-                .string_tables
-                .get_table_mut(table_id)
-                .unwrap_unchecked()
+        let Some(string_table) = self.ctx.string_tables.get_table_mut(table_id) else {
+            bail!("string table not found")
         };
 
         let mut br = BitReader::new(msg.string_data());
         string_table.parse_update(&mut br, msg.num_changed_entries())?;
         br.is_overflowed()?;
 
-        if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME) {
-            if let Some(entity_classes) = self.ctx.entity_classes.as_ref() {
-                self.ctx
-                    .instance_baseline
-                    .update(string_table, entity_classes.classes)?;
-            }
+        if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME)
+            && let Some(entity_classes) = self.ctx.entity_classes.as_ref()
+        {
+            self.ctx
+                .instance_baseline
+                .update(string_table, entity_classes.classes)?;
         }
 
         Ok(())
@@ -511,8 +509,12 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         // SAFETY: safety here can only be guaranteed by the fact that entity
         // classes and flattened serializers become available before packet
         // entities.
-        let entity_classes = unsafe { self.ctx.entity_classes.as_ref().unwrap_unchecked() };
-        let serializers = unsafe { self.ctx.serializers.as_ref().unwrap_unchecked() };
+        let Some(entity_classes) = self.ctx.entity_classes.as_ref() else {
+            bail!("entity classes are not available");
+        };
+        let Some(serializers) = self.ctx.serializers.as_ref() else {
+            bail!("serializers are not available");
+        };
         let instance_baseline = &self.ctx.instance_baseline;
 
         let entity_data = msg.entity_data();
@@ -528,45 +530,37 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             let delta_header = DeltaHeader::from_bit_reader(&mut br)?;
             match delta_header {
                 DeltaHeader::CREATE => {
-                    let entity = unsafe {
-                        let entity = self.ctx.entities.handle_create(
-                            entity_index,
-                            &mut self.field_decode_ctx,
-                            &mut br,
-                            entity_classes,
-                            instance_baseline,
-                            serializers,
-                        )?;
-                        // SAFETY: borrow checker is not happy because handle_create requires
-                        // mutable access to entities; rust's borrowing rules specify that you
-                        // cannot have both mutable and immutable refs to the same data at the same
-                        // time.
-                        //
-                        // alternative would be to call .handle_create and then .get, but that does
-                        // not make any sense, that is redundant because .get is called inside of
-                        // .handle_create. i can't think of any issues that may arrise because of
-                        // my raw pointer approach.
-                        &*(entity as *const Entity)
+                    let index = self.ctx.entities.handle_create(
+                        entity_index,
+                        &mut self.field_decode_ctx,
+                        &mut br,
+                        entity_classes,
+                        instance_baseline,
+                        serializers,
+                    )?;
+                    let Some(entity) = self.ctx.entities.get(&index) else {
+                        bail!("entity not found")
                     };
                     self.visitor
                         .on_entity(&self.ctx, delta_header, entity)
                         .await?;
                 }
                 DeltaHeader::DELETE => {
-                    let entity = unsafe { self.ctx.entities.handle_delete_unchecked(entity_index) };
-                    self.visitor
-                        .on_entity(&self.ctx, delta_header, &entity)
-                        .await?;
+                    let entity = self.ctx.entities.handle_delete(entity_index);
+                    if let Some(entity) = entity {
+                        self.visitor
+                            .on_entity(&self.ctx, delta_header, &entity)
+                            .await?;
+                    }
                 }
                 DeltaHeader::UPDATE => {
-                    let entity = unsafe {
-                        let entity = self.ctx.entities.handle_update_unchecked(
-                            entity_index,
-                            &mut self.field_decode_ctx,
-                            &mut br,
-                        )?;
-                        // SAFETY: see comment above (below .handle_create call); same stuff.
-                        &*(entity as *const Entity)
+                    self.ctx.entities.handle_update(
+                        entity_index,
+                        &mut self.field_decode_ctx,
+                        &mut br,
+                    )?;
+                    let Some(entity) = self.ctx.entities.get(&entity_index) else {
+                        bail!("entity not found")
                     };
                     self.visitor
                         .on_entity(&self.ctx, delta_header, entity)
@@ -580,11 +574,12 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         Ok(())
     }
 
-    fn handle_cmd_string_tables(&mut self, cmd: CDemoStringTables) -> anyhow::Result<()> {
+    fn handle_cmd_string_tables(&mut self, cmd: &CDemoStringTables) -> anyhow::Result<()> {
         self.ctx.string_tables.do_full_update(cmd);
 
-        // SAFETY: entity_classes value is expected to be already assigned
-        let entity_classes = unsafe { self.ctx.entity_classes.as_ref().unwrap_unchecked() };
+        let Some(entity_classes) = self.ctx.entity_classes.as_ref() else {
+            bail!("entity classes are not available")
+        };
         if let Some(string_table) = self
             .ctx
             .string_tables
@@ -599,7 +594,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
     }
 
     async fn handle_cmd_full_packet(&mut self, cmd: CDemoFullPacket) -> anyhow::Result<()> {
-        if let Some(string_table) = cmd.string_table {
+        if let Some(string_table) = cmd.string_table.as_ref() {
             self.handle_cmd_string_tables(string_table)?;
         }
 

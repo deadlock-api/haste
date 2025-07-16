@@ -1,5 +1,5 @@
-use std::fmt::Debug;
-
+use core::fmt::Debug;
+use core::str::Utf8Error;
 use dungers::bitbuf::BitError;
 use dyn_clone::DynClone;
 
@@ -13,9 +13,13 @@ use crate::quantizedfloat::{QuantizedFloat, QuantizedFloatError};
 // decoders, proxies and all of the stuff.
 
 #[derive(thiserror::Error, Debug)]
-pub enum FieldDecoderConstructionError {
+pub enum DecoderError {
     #[error(transparent)]
-    QuantizedFloatError(#[from] QuantizedFloatError),
+    QuantizedFloat(#[from] QuantizedFloatError),
+    #[error(transparent)]
+    Bit(#[from] BitError),
+    #[error(transparent)]
+    UTF8(#[from] Utf8Error),
 }
 
 // ----
@@ -55,7 +59,7 @@ pub(crate) trait FieldDecode: DynClone + Debug + Send + Sync {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError>;
+    ) -> Result<FieldValue, DecoderError>;
 }
 
 dyn_clone::clone_trait_object!(FieldDecode);
@@ -70,7 +74,7 @@ impl FieldDecode for InvalidDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         _br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         unreachable!()
     }
 }
@@ -93,7 +97,7 @@ impl FieldDecode for I64Decoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::I64(br.read_varint64()?))
     }
 }
@@ -108,7 +112,7 @@ impl FieldDecode for InternalU64Decoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::U64(br.read_uvarint64()?))
     }
 }
@@ -121,7 +125,7 @@ impl FieldDecode for InternalU64Fixed64Decoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let mut buf = [0u8; 8];
         br.read_bytes(&mut buf)?;
         Ok(FieldValue::U64(u64::from_le_bytes(buf)))
@@ -136,7 +140,6 @@ pub(crate) struct U64Decoder {
 // NOTE: default should only be used to decode dynamic array lengths. for everything else decoder
 // must be constructed using U64Decoder's new method.
 impl Default for U64Decoder {
-    #[inline]
     fn default() -> Self {
         Self {
             decoder: Box::<InternalU64Decoder>::default(),
@@ -161,7 +164,7 @@ impl FieldDecode for U64Decoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         self.decoder.decode(ctx, br)
     }
 }
@@ -176,7 +179,7 @@ impl FieldDecode for BoolDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::Bool(br.read_bool()?))
     }
 }
@@ -191,12 +194,12 @@ impl FieldDecode for StringDecoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let n = br.read_string(&mut ctx.string_buf, false)?;
         // TODO(blukai): should string conversion be actually checked? why not?
-        Ok(FieldValue::String(Box::<str>::from(unsafe {
-            std::str::from_utf8_unchecked(&ctx.string_buf[..n])
-        })))
+        Ok(FieldValue::String(Box::<str>::from(core::str::from_utf8(
+            &ctx.string_buf[..n],
+        )?)))
     }
 }
 
@@ -244,10 +247,7 @@ struct InternalQuantizedFloatDecoder {
 }
 
 impl InternalQuantizedFloatDecoder {
-    #[inline]
-    pub(crate) fn new(
-        field: &FlattenedSerializerField,
-    ) -> Result<Self, FieldDecoderConstructionError> {
+    pub(crate) fn new(field: &FlattenedSerializerField) -> Result<Self, DecoderError> {
         Ok(Self {
             quantized_float: QuantizedFloat::new(
                 field.bit_count.unwrap_or_default(),
@@ -273,9 +273,7 @@ pub(crate) struct InternalF32Decoder {
 }
 
 impl InternalF32Decoder {
-    pub(crate) fn new(
-        field: &FlattenedSerializerField,
-    ) -> Result<Self, FieldDecoderConstructionError> {
+    pub(crate) fn new(field: &FlattenedSerializerField) -> Result<Self, DecoderError> {
         if field.var_name.hash == fxhash::hash_bytes(b"m_flSimulationTime")
             || field.var_name.hash == fxhash::hash_bytes(b"m_flAnimTime")
         {
@@ -303,7 +301,7 @@ impl InternalF32Decoder {
         let bit_count = field.bit_count.unwrap_or_default();
         // NOTE: that would mean that something is seriously wrong - in that case yell at me
         // loudly.
-        debug_assert!(bit_count >= 0 && bit_count <= 32);
+        debug_assert!((0..=32).contains(&bit_count));
         if bit_count == 0 || bit_count == 32 {
             return Ok(Self {
                 decoder: Box::<InternalF32NoScaleDecoder>::default(),
@@ -328,10 +326,7 @@ pub(crate) struct F32Decoder {
 }
 
 impl F32Decoder {
-    #[inline]
-    pub(crate) fn new(
-        field: &FlattenedSerializerField,
-    ) -> Result<Self, FieldDecoderConstructionError> {
+    pub(crate) fn new(field: &FlattenedSerializerField) -> Result<Self, DecoderError> {
         Ok(Self {
             decoder: Box::new(InternalF32Decoder::new(field)?),
         })
@@ -343,7 +338,7 @@ impl FieldDecode for F32Decoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::F32(self.decoder.decode(ctx, br)?))
     }
 }
@@ -360,7 +355,7 @@ impl FieldDecode for InternalVector3DefaultDecoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let vec3 = [
             self.decoder.decode(ctx, br)?,
             self.decoder.decode(ctx, br)?,
@@ -378,7 +373,7 @@ impl FieldDecode for InternalVector3NormalDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::Vector3(br.read_bitvec3normal()?))
     }
 }
@@ -389,10 +384,7 @@ pub(crate) struct Vector3Decoder {
 }
 
 impl Vector3Decoder {
-    #[inline]
-    pub(crate) fn new(
-        field: &FlattenedSerializerField,
-    ) -> Result<Self, FieldDecoderConstructionError> {
+    pub(crate) fn new(field: &FlattenedSerializerField) -> Result<Self, DecoderError> {
         if field.var_encoder_heq(fxhash::hash_bytes(b"normal")) {
             Ok(Self {
                 decoder: Box::<InternalVector3NormalDecoder>::default(),
@@ -412,7 +404,7 @@ impl FieldDecode for Vector3Decoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         self.decoder.decode(ctx, br)
     }
 }
@@ -425,10 +417,7 @@ pub(crate) struct Vector2Decoder {
 }
 
 impl Vector2Decoder {
-    #[inline]
-    pub(crate) fn new(
-        field: &FlattenedSerializerField,
-    ) -> Result<Self, FieldDecoderConstructionError> {
+    pub(crate) fn new(field: &FlattenedSerializerField) -> Result<Self, DecoderError> {
         Ok(Self {
             decoder: Box::new(InternalF32Decoder::new(field)?),
         })
@@ -440,7 +429,7 @@ impl FieldDecode for Vector2Decoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let vec2 = [self.decoder.decode(ctx, br)?, self.decoder.decode(ctx, br)?];
         Ok(FieldValue::Vector2(vec2))
     }
@@ -454,10 +443,7 @@ pub(crate) struct Vector4Decoder {
 }
 
 impl Vector4Decoder {
-    #[inline]
-    pub(crate) fn new(
-        field: &FlattenedSerializerField,
-    ) -> Result<Self, FieldDecoderConstructionError> {
+    pub(crate) fn new(field: &FlattenedSerializerField) -> Result<Self, DecoderError> {
         Ok(Self {
             decoder: Box::new(InternalF32Decoder::new(field)?),
         })
@@ -469,7 +455,7 @@ impl FieldDecode for Vector4Decoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let vec4 = [
             self.decoder.decode(ctx, br)?,
             self.decoder.decode(ctx, br)?,
@@ -492,7 +478,7 @@ impl FieldDecode for InternalQAnglePitchYawDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let vec3 = [
             br.read_bitangle(self.bit_count)?,
             br.read_bitangle(self.bit_count)?,
@@ -510,7 +496,7 @@ impl FieldDecode for InternalQAngleNoBitCountDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::QAngle(br.read_bitvec3coord()?))
     }
 }
@@ -523,7 +509,7 @@ impl FieldDecode for InternalQAnglePreciseDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let mut vec3 = [0f32; 3];
 
         let rx = br.read_bool()?;
@@ -554,7 +540,7 @@ impl FieldDecode for InternalQAngleBitCountDecoder {
         &self,
         _ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         let vec3 = [
             br.read_bitangle(self.bit_count)?,
             br.read_bitangle(self.bit_count)?,
@@ -612,7 +598,7 @@ impl FieldDecode for QAngleDecoder {
         &self,
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<FieldValue, BitError> {
+    ) -> Result<FieldValue, DecoderError> {
         self.decoder.decode(ctx, br)
     }
 }
