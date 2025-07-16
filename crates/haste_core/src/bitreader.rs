@@ -33,7 +33,7 @@ pub struct BitReader<'a> {
 /// deferred bounds checking allows to eliminate a very significant amount of branches which
 /// results in very noticable speed boost.
 impl<'a> BitReader<'a> {
-    #[inline]
+    #[must_use]
     pub fn new(data: &'a [u8]) -> Self {
         Self {
             inner: bitbuf::BitReader::new(data),
@@ -41,62 +41,58 @@ impl<'a> BitReader<'a> {
         }
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
-    #[inline]
+    /// delegated from [`dungers::bitbuf::BitReader`].
+    #[must_use]
     pub fn num_bits_left(&self) -> usize {
         self.inner.num_bits_left()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
-    #[inline]
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_ubit64(&mut self, num_bits: usize) -> Result<u64, BitError> {
         self.inner.read_ubit64(num_bits)
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
-    #[inline]
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_bool(&mut self) -> Result<bool, BitError> {
         self.inner.read_bool()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
-    #[inline]
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_byte(&mut self) -> Result<u8, BitError> {
         self.inner.read_byte()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_bits(&mut self, buf: &mut [u8], num_bits: usize) -> Result<(), BitError> {
         self.inner.read_bits(buf, num_bits)
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_bytes(&mut self, buf: &mut [u8]) -> Result<(), BitError> {
         self.inner.read_bytes(buf)
     }
 
-    #[inline]
     pub fn is_overflowed(&mut self) -> Result<(), BitError> {
         self.did_check_overflow = true;
         self.inner.is_overflowed()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_uvarint32(&mut self) -> Result<u32, BitError> {
         self.inner.read_uvarint32()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_uvarint64(&mut self) -> Result<u64, BitError> {
         self.inner.read_uvarint()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_varint32(&mut self) -> Result<i32, BitError> {
         self.inner.read_varint32()
     }
 
-    /// delegated from [dungers::bitbuf::BitReader].
+    /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_varint64(&mut self) -> Result<i64, BitError> {
         self.inner.read_varint64()
     }
@@ -116,7 +112,7 @@ impl<'a> BitReader<'a> {
     // Y set -> read 4
     // X set -> read 8
     // X + Y set -> read 28
-    #[inline]
+
     pub fn read_ubitvar(&mut self) -> Result<u32, BitError> {
         let ret = self.read_ubit64(6)?;
         let ret = match ret & (16 | 32) {
@@ -128,7 +124,6 @@ impl<'a> BitReader<'a> {
         ret.try_into().map_err(BitError::TryFromIntError)
     }
 
-    #[inline]
     pub fn read_bitfloat(&mut self) -> Result<f32, BitError> {
         Ok(f32::from_bits(self.read_ubit64(32)?.try_into()?))
     }

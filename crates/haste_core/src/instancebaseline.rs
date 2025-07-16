@@ -34,6 +34,7 @@ impl InstanceBaseline {
         Ok(())
     }
 
+    #[allow(unsafe_code)]
     #[inline]
     pub(crate) unsafe fn by_id_unchecked(&self, class_id: i32) -> &[u8] {
         unsafe {

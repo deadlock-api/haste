@@ -26,7 +26,6 @@ pub struct FieldPath {
 }
 
 impl Default for FieldPath {
-    #[inline]
     fn default() -> Self {
         Self {
             data: [255, 0, 0, 0, 0, 0, 0],
@@ -39,23 +38,19 @@ impl Default for FieldPath {
 impl FieldPath {
     // ops
 
-    #[inline]
     fn inc_at(&mut self, i: usize, v: i32) {
         self.data[i] = ((self.data[i] as i32 + v) & 0xFF) as u8;
     }
 
-    #[inline]
     fn inc_last(&mut self, v: i32) {
         self.inc_at(self.last, v);
     }
 
-    #[inline]
     fn push(&mut self, v: i32) {
         self.last += 1;
         self.data[self.last] = (v & 0xFF) as u8;
     }
 
-    #[inline]
     fn pop(&mut self, n: usize) {
         for _ in 0..n {
             self.data[self.last] = 0;
@@ -74,18 +69,17 @@ impl FieldPath {
 
     // NOTE: using this method can hurt performance when used in critical code paths. use the
     // unsafe [`Self::get_unchecked`] instead.
-    #[inline]
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<usize> {
         self.data.get(index).map(|component| *component as usize)
     }
 
-    #[inline]
+    #[must_use]
     pub fn last(&self) -> usize {
         self.last
     }
 
-    #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = &u8> {
+    pub fn iter(&self) -> impl Iterator<Item=&u8> {
         self.data.iter().take(self.last + 1)
     }
 }

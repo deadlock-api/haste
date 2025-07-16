@@ -35,7 +35,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[inline]
     fn next_token(&mut self) -> Result<Option<Token<'a>>, Error> {
         if let Some(token) = self.prev_token.take() {
             Ok(Some(token))
@@ -44,7 +43,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[inline]
     fn expect_token<F>(&mut self, f: F) -> Result<Token<'a>, Error>
     where
         F: FnOnce(&TokenKind<'a>) -> bool,

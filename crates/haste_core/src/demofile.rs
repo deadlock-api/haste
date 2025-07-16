@@ -85,7 +85,6 @@ impl<R: Read + Seek> DemoFile<R> {
         })
     }
 
-    #[inline]
     pub fn demo_header(&self) -> &DemoHeader {
         &self.demo_header
     }
@@ -110,7 +109,6 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
     // ----
 
     /// delegated from [`std::io::Seek`].
-    #[inline]
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
         self.rdr.seek(pos)
     }
@@ -121,7 +119,6 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
     ///
     /// be aware that this method can be quite expensive. it might be best to make sure not to call
     /// it too frequently.
-    #[inline]
     fn stream_position(&mut self) -> Result<u64, io::Error> {
         self.rdr.stream_position()
     }
@@ -193,22 +190,18 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
         }
     }
 
-    #[inline]
     fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
         CDemoSendTables::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    #[inline]
     fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
         CDemoClassInfo::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    #[inline]
     fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
         CDemoPacket::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    #[inline]
     fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {
         CDemoFullPacket::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }

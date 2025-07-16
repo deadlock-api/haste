@@ -21,12 +21,14 @@ impl Debug for Span {
 }
 
 impl Span {
+    #[must_use]
     pub fn new(start: u16, end: u16) -> Self {
         debug_assert!(start <= end);
         Self { start, end }
     }
 
-    pub fn to(self, end: Self) -> Self {
+    #[must_use]
+    pub fn to(self, end: &Self) -> Self {
         Self::new(self.start, end.end)
     }
 }

@@ -30,25 +30,22 @@ pub struct Tokenizer<'a> {
     cursor: Charsor<'a>,
 }
 
-#[inline]
 fn is_ident_start(ch: char) -> bool {
     ch.is_ascii_alphabetic()
 }
 
-#[inline]
 fn is_ident_continue(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
 
 impl<'a> Tokenizer<'a> {
-    #[inline]
+    #[must_use]
     pub fn new(input: &'a str) -> Self {
         Self {
             cursor: Charsor::new(input),
         }
     }
 
-    #[inline]
     fn emit(&mut self, kind: TokenKind<'a>) -> Token<'a> {
         let start = self.cursor.prev_offset();
         let end = self.cursor.offset();
@@ -56,7 +53,6 @@ impl<'a> Tokenizer<'a> {
         Token::new(kind, Span::new(start as u16, end as u16))
     }
 
-    #[inline]
     fn emit_ident(&mut self) -> Token<'a> {
         let start = self.cursor.prev_offset();
         self.cursor.eat_while(is_ident_continue);
@@ -68,7 +64,6 @@ impl<'a> Tokenizer<'a> {
         )
     }
 
-    #[inline]
     fn emit_lit(&mut self) -> Token<'a> {
         let start = self.cursor.prev_offset();
         self.cursor.eat_while(|ch| ch.is_ascii_digit());
@@ -80,12 +75,10 @@ impl<'a> Tokenizer<'a> {
         )
     }
 
-    #[inline]
     fn eat_whitespace(&mut self) {
         self.cursor.eat_while(|ch| ch.is_whitespace());
     }
 
-    #[inline]
     fn next_token(&mut self) -> Option<Result<Token<'a>, Error>> {
         loop {
             let Some(ch) = self.cursor.next() else {

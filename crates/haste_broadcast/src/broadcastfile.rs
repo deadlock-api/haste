@@ -46,7 +46,6 @@ impl<R: Read + Seek> DemoStream for BroadcastFile<R> {
     // ----
 
     /// delegated from [`std::io::Seek`].
-    #[inline]
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
         self.rdr.seek(pos)
     }
@@ -57,7 +56,6 @@ impl<R: Read + Seek> DemoStream for BroadcastFile<R> {
     ///
     /// be aware that this method can be quite expensive. it might be best to make sure not to call
     /// it too frequently.
-    #[inline]
     fn stream_position(&mut self) -> Result<u64, io::Error> {
         self.rdr.stream_position()
     }
@@ -80,22 +78,18 @@ impl<R: Read + Seek> DemoStream for BroadcastFile<R> {
         Ok(data)
     }
 
-    #[inline]
     fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
         decode_cmd_send_tables(data)
     }
 
-    #[inline]
     fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
         decode_cmd_class_info(data)
     }
 
-    #[inline]
     fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
         decode_cmd_packet(data)
     }
 
-    #[inline]
     fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {
         decode_cmd_full_packet(data)
     }

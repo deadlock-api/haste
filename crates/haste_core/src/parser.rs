@@ -51,7 +51,7 @@ pub struct Context {
 impl Context {
     // NOTE: following methods are public-facing api; do not use them internally
 
-    #[inline]
+    #[must_use]
     pub fn string_tables(&self) -> Option<&StringTableContainer> {
         if self.string_tables.is_empty() {
             None
@@ -60,17 +60,17 @@ impl Context {
         }
     }
 
-    #[inline]
+    #[must_use]
     pub fn serializers(&self) -> Option<&FlattenedSerializerContainer> {
         self.serializers.as_ref()
     }
 
-    #[inline]
+    #[must_use]
     pub fn entity_classes(&self) -> Option<&EntityClasses> {
         self.entity_classes.as_ref()
     }
 
-    #[inline]
+    #[must_use]
     pub fn entities(&self) -> Option<&EntityContainer> {
         if self.entities.is_empty() {
             None
@@ -79,12 +79,12 @@ impl Context {
         }
     }
 
-    #[inline]
+    #[must_use]
     pub fn tick_interval(&self) -> f32 {
         self.tick_interval
     }
 
-    #[inline]
+    #[must_use]
     pub fn tick(&self) -> i32 {
         self.tick
     }
@@ -613,17 +613,14 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
     // public api
     // ----
 
-    #[inline]
     pub fn demo_stream(&self) -> &D {
         &self.demo_stream
     }
 
-    #[inline]
     pub fn demo_stream_mut(&mut self) -> &mut D {
         &mut self.demo_stream
     }
 
-    #[inline]
     pub fn context(&self) -> &Context {
         &self.ctx
     }

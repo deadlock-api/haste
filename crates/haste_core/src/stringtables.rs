@@ -47,7 +47,6 @@ pub enum StringTableError {
     BitReader(#[from] BitError),
 }
 
-#[derive(Debug)]
 pub struct StringTableItem {
     pub string: Option<Vec<u8>>,
     pub user_data: Option<Arc<SyncUnsafeCell<Vec<u8>>>>,
@@ -70,6 +69,7 @@ pub struct StringTable {
 }
 
 impl StringTable {
+    #[must_use]
     pub fn new(
         name: &str,
         user_data_fixed_size: bool,
@@ -293,17 +293,16 @@ impl StringTable {
     // void EnableRollback();
     // void RestoreTick(int tick);
 
-    #[inline]
+    #[must_use]
     pub fn name(&self) -> &str {
         self.name.as_ref()
     }
 
-    #[inline]
-    pub fn items(&self) -> impl Iterator<Item = (&i32, &StringTableItem)> {
+    pub fn items(&self) -> impl Iterator<Item=(&i32, &StringTableItem)> {
         self.items.iter()
     }
 
-    #[inline]
+    #[must_use]
     pub fn get_item(&self, entry_index: &i32) -> Option<&StringTableItem> {
         self.items.get(entry_index)
     }
@@ -354,6 +353,7 @@ impl StringTableContainer {
     }
 
     // INetworkStringTable *FindTable( const char *tableName ) const ;
+    #[must_use]
     pub fn find_table(&self, name: &str) -> Option<&StringTable> {
         self.tables
             .iter()
@@ -368,17 +368,16 @@ impl StringTableContainer {
     }
 
     // INetworkStringTable	*GetTable( TABLEID stringTable ) const;
-    #[inline]
+    #[must_use]
     pub fn get_table(&self, id: usize) -> Option<&StringTable> {
         self.tables.get(id)
     }
 
-    #[inline]
     pub fn get_table_mut(&mut self, id: usize) -> Option<&mut StringTable> {
         self.tables.get_mut(id)
     }
 
-    #[inline]
+    #[must_use]
     pub fn has_table(&self, id: usize) -> bool {
         self.get_table(id).is_some()
     }
@@ -401,6 +400,7 @@ impl StringTableContainer {
     // idiomatic xd - `is_empty` is.
     //
     // int                  GetNumTables( void ) const;
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tables.is_empty()
     }

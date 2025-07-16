@@ -535,22 +535,18 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
         }
     }
 
-    #[inline]
     fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
         decode_cmd_send_tables(data)
     }
 
-    #[inline]
     fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
         decode_cmd_class_info(data)
     }
 
-    #[inline]
     fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
         decode_cmd_packet(data)
     }
 
-    #[inline]
     fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {
         decode_cmd_full_packet(data)
     }

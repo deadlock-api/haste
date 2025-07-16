@@ -68,7 +68,6 @@ pub(crate) enum FieldSpecialDescriptor {
 }
 
 impl FieldSpecialDescriptor {
-    #[inline]
     pub(crate) fn is_dynamic_array(&self) -> bool {
         matches!(
             self,
@@ -84,7 +83,6 @@ pub(crate) struct FieldMetadata {
 }
 
 impl Default for FieldMetadata {
-    #[inline]
     fn default() -> Self {
         Self {
             special_descriptor: None,
@@ -93,7 +91,6 @@ impl Default for FieldMetadata {
     }
 }
 
-#[inline]
 fn visit_ident(
     ident: &str,
     field: &FlattenedSerializerField,
@@ -182,7 +179,6 @@ fn visit_ident(
     }
 }
 
-#[inline]
 fn visit_template(
     expr: Expr,
     arg: Expr,
@@ -214,7 +210,6 @@ fn visit_template(
     visit_ident(ident, field)
 }
 
-#[inline]
 fn visit_array(
     expr: Expr,
     len: Expr,
@@ -249,7 +244,7 @@ fn visit_array(
     })
 }
 
-#[inline]
+#[allow(clippy::unnecessary_wraps)]
 fn visit_pointer() -> Result<FieldMetadata, FieldMetadataError> {
     Ok(FieldMetadata {
         special_descriptor: Some(FieldSpecialDescriptor::Pointer),
@@ -257,7 +252,6 @@ fn visit_pointer() -> Result<FieldMetadata, FieldMetadataError> {
     })
 }
 
-#[inline]
 fn visit_any(
     expr: Expr,
     field: &FlattenedSerializerField,

@@ -148,12 +148,11 @@ impl FlattenedSerializerField {
             .and_then(|fs| fs.get_child(index))
     }
 
-    #[inline]
     pub(crate) fn var_encoder_heq(&self, rhs: u64) -> bool {
         self.var_encoder.as_ref().is_some_and(|lhs| lhs.hash == rhs)
     }
 
-    #[inline]
+    #[must_use]
     pub fn is_dynamic_array(&self) -> bool {
         self.metadata
             .special_descriptor
@@ -210,6 +209,7 @@ impl FlattenedSerializer {
 
     // NOTE: using this method can hurt performance when used in critical code
     // paths. use the unsafe [`Self::get_child_unchecked`] instead.
+    #[must_use]
     pub fn get_child(&self, index: usize) -> Option<&FlattenedSerializerField> {
         self.fields.get(index).map(|field| field.as_ref())
     }
@@ -324,8 +324,7 @@ impl FlattenedSerializerContainer {
     }
 
     // TODO: think about exposing the whole serializer map
-
-    #[inline]
+    #[must_use]
     pub fn by_name_hash(&self, serializer_name_hash: u64) -> Option<Arc<FlattenedSerializer>> {
         self.serializer_map.get(&serializer_name_hash).cloned()
     }

@@ -38,6 +38,7 @@ const NUM_NETWORKED_EHANDLE_SERIAL_NUMBER_BITS: u32 = 10;
 const NUM_NETWORKED_EHANDLE_BITS: u32 = MAX_EDICT_BITS + NUM_NETWORKED_EHANDLE_SERIAL_NUMBER_BITS;
 const INVALID_NETWORKED_EHANDLE_VALUE: u32 = (1 << NUM_NETWORKED_EHANDLE_BITS) - 1;
 
+#[must_use]
 pub fn is_ehandle_valid(handle: u32) -> bool {
     handle != INVALID_NETWORKED_EHANDLE_VALUE
 }
@@ -47,6 +48,7 @@ pub fn is_ehandle_valid(handle: u32) -> bool {
 // int iEntity = pData->m_Value.m_Int & ((1 << MAX_EDICT_BITS) - 1);
 // int iSerialNum = pData->m_Value.m_Int >> MAX_EDICT_BITS;
 
+#[must_use]
 pub fn ehandle_to_index(handle: u32) -> i32 {
     (handle & ((1 << MAX_EDICT_BITS) - 1)) as i32
 }
@@ -65,7 +67,6 @@ pub fn ehandle_to_index(handle: u32) -> i32 {
 /// given a cell and an offset in that cell, reconstruct the world coord.
 ///
 /// game/shared/cellcoord.h
-#[inline]
 fn coord_from_cell(cell_width: u32, max_coord: u32, cell: u16, vec: f32) -> f32 {
     let cell_pos = cell as u32 * cell_width;
     // nanitfi is r, what does it stand for in this context? (copypasting from valve)
@@ -108,6 +109,7 @@ mod deadlock {
     // m_pGameRules.m_vMinimapMaxs:Vector = [8960.0, 8960.0, 0.0]
 
     /// given a cell and an offset in that cell, reconstruct the world coord.
+    #[must_use]
     pub fn coord_from_cell(cell: u16, vec: f32) -> f32 {
         super::coord_from_cell(CELL_WIDTH, MAX_COORD_INTEGER, cell, vec)
     }
@@ -138,6 +140,7 @@ pub use dota2::coord_from_cell as dota2_coord_from_cell;
 /// generates field key from given path. can and recommended to be called from a const context.
 /// when called from a const context, the function is interpreted by the compiler at compile time
 /// meaning that there's no const of generating key for given path at runtime.
+#[must_use]
 pub const fn fkey_from_path(path: &[&str]) -> u64 {
     assert!(path.len() > 0, "invalid path");
 
@@ -191,7 +194,6 @@ impl DeltaHeader {
     // true -> true; FHDR_LEAVEPVS and FHDR_DELETE
     pub const DELETE: Self = Self(0b11);
 
-    #[inline]
     pub(crate) fn from_bit_reader(br: &mut BitReader) -> Result<Self, BitError> {
         // TODO(blukai): also try merging two bits from read_bool. who's faster?
         let mut buf = [0u8];
@@ -316,14 +318,17 @@ impl Entity {
         )
     }
 
+    #[must_use]
     pub fn serializer(&self) -> &FlattenedSerializer {
         self.serializer.as_ref()
     }
 
+    #[must_use]
     pub fn serializer_name_heq(&self, rhs: u64) -> bool {
         self.serializer.serializer_name.hash == rhs
     }
 
+    #[must_use]
     pub fn get_serializer_field(&self, path: &FieldPath) -> Option<&FlattenedSerializerField> {
         let first = path.get(0).and_then(|i| self.serializer.get_child(i));
         path.iter().skip(1).fold(first, |field, i| {
@@ -331,6 +336,7 @@ impl Entity {
         })
     }
 
+    #[must_use]
     pub fn index(&self) -> i32 {
         self.index
     }
@@ -461,6 +467,7 @@ impl EntityContainer {
         self.entities.iter()
     }
 
+    #[must_use]
     pub fn get(&self, index: &i32) -> Option<&Entity> {
         self.entities.get(index)
     }
@@ -469,6 +476,7 @@ impl EntityContainer {
         self.baseline_entities.iter()
     }
 
+    #[must_use]
     pub fn get_baseline(&self, index: &i32) -> Option<&Entity> {
         self.baseline_entities.get(index)
     }
@@ -480,6 +488,7 @@ impl EntityContainer {
         self.baseline_entities.clear();
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entities.is_empty()
     }

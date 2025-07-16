@@ -145,7 +145,6 @@ impl Default for U64Decoder {
 }
 
 impl U64Decoder {
-    #[inline]
     pub(crate) fn new(field: &FlattenedSerializerField) -> Self {
         if field.var_encoder_heq(fxhash::hash_bytes(b"fixed64")) {
             Self {

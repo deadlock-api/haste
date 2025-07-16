@@ -27,7 +27,6 @@ pub trait HttpClient {
 // reqwest impl
 // ----
 
-#[cfg(feature = "reqwest")]
 mod reqwest_impl {
     use bytes::Bytes;
 
