@@ -13,28 +13,23 @@ haste_broadcast = { path = "crates/haste_broadcast", default-features = false }
 haste_core = { path = "crates/haste_core" }
 haste_vartype = { path = "crates/haste_vartype" }
 # external
-anyhow = "1.0.86"
-bytes = "1.7.2"
-dungers = { git = "https://github.com/blukai/dungers.git", rev = "5419784ef771089369bdce5463a6cf6da35d3a79" }
-dyn-clone = "1.0.17"
-expect-test = "1.5.0"
-hashbrown = { version = "0.14.5", default-features = false }
-http = "1.1.0"
-lazy_static = "1.5.0"
-log = "0.4.22"
+anyhow = "1.0.98"
+bytes = "1.10.1"
+dungers = { git = "https://github.com/deadlock-api/dungers.git", rev = "5e1e2aac76a027987911de3ef3d23ecfd992a7fb" }
+dyn-clone = "1.0.19"
+expect-test = "1.5.1"
+hashbrown = { version = "0.15.4", default-features = false }
+http = "1.3.1"
+log = "0.4.27"
 nohash = "0.2.0"
-prost = "0.13.3"
-reqwest = { version = "0.12.8", default-features = false }
-serde = "1.0.210"
-serde_json = "1.0.128"
+prost = "0.14.1"
+reqwest = { version = "0.12.22", default-features = false }
+serde = "1.0.219"
+serde_json = "1.0.140"
 snap = "1.1.1"
 thiserror = "1.0.64"
 tokio = { version = "1.40.0", default-features = false }
 valveprotos = { git = "https://github.com/blukai/valveprotos-rs.git", rev = "63620c46236ed0f03a9e8b75954a4dafd0fe8e53" }
-
-# enable more optimizations in dev (/debug) builds for dependencies
-[profile.dev.package."*"]
-opt-level = 3
 
 [package]
 name = "haste"
