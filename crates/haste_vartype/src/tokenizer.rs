@@ -76,7 +76,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn eat_whitespace(&mut self) {
-        self.cursor.eat_while(|ch| ch.is_whitespace());
+        self.cursor.eat_while(char::is_whitespace);
     }
 
     fn next_token(&mut self) -> Option<Result<Token<'a>, Error>> {
@@ -116,15 +116,16 @@ mod tests {
 
     use super::*;
 
+    #[allow(clippy::too_many_lines)]
     #[test]
     fn it_works() {
-        const INPUT: &str = r#"
+        const INPUT: &str = r"
 uint64[256]
 CDOTAGameManager*
 CNetworkUtlVectorBase< CHandle< CBasePlayerController > >
 CHandle< CDOTASpecGraphPlayerData >[24]
 CDOTA_AbilityDraftAbilityState[MAX_ABILITY_DRAFT_ABILITIES]
-            "#;
+            ";
 
         let tokenizer = Tokenizer::new(INPUT);
         let tokens: Vec<Result<Token, Error>> = tokenizer.collect();

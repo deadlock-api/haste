@@ -118,30 +118,30 @@ mod tests {
     #[test]
     fn unexpected_eof() {
         let result = parse("");
-        let expected = expect![[r#"
+        let expected = expect![[r"
             Err(
                 UnexpectedEof,
             )
-        "#]];
+        "]];
         expected.assert_debug_eq(&result);
     }
 
     #[test]
     fn unexpected_token() {
         let result = parse("42");
-        let expected = expect![[r#"
+        let expected = expect![[r"
             Err(
                 UnexpectedToken(
                     0,
                 ),
             )
-        "#]];
+        "]];
         expected.assert_debug_eq(&result);
     }
 
     #[test]
-    fn it_works() -> Result<(), Error> {
-        const INPUTS: [&'static str; 5] = [
+    fn it_works() {
+        const INPUTS: [&str; 5] = [
             "uint64[256]",
             "CDOTAGameManager*",
             "CNetworkUtlVectorBase< CHandle< CBasePlayerController > >",
@@ -151,7 +151,9 @@ mod tests {
 
         let mut outputs: Vec<Result<Expr<'static>, Error>> = Vec::with_capacity(INPUTS.len());
 
-        INPUTS.iter().for_each(|input| outputs.push(parse(input)));
+        for input in INPUTS {
+            outputs.push(parse(input));
+        }
 
         let expected = expect![[r#"
             [
@@ -219,7 +221,5 @@ mod tests {
             ]
         "#]];
         expected.assert_debug_eq(&outputs);
-
-        Ok(())
     }
 }

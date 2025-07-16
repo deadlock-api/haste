@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 // start and end are byte positions relative to the beginning of the input.
 //
@@ -15,7 +15,7 @@ pub struct Span {
 // NOTE: custom implementation of Debug trait makes Span's debug printing more compact which
 // improves readability.
 impl Debug for Span {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("Span {{ {}, {} }}", self.start, self.end))
     }
 }
