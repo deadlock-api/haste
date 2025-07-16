@@ -79,7 +79,7 @@ impl<R: Read + Seek> DemoStream for BroadcastFile<R> {
     }
 
     fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
-        decode_cmd_send_tables(data)
+        Ok(decode_cmd_send_tables(data))
     }
 
     fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
@@ -87,7 +87,7 @@ impl<R: Read + Seek> DemoStream for BroadcastFile<R> {
     }
 
     fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
-        decode_cmd_packet(data)
+        Ok(decode_cmd_packet(data))
     }
 
     fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {

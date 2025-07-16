@@ -1,7 +1,8 @@
-use std::error::Error;
+use core::error::Error;
+use core::marker::PhantomData;
+use core::time::Duration;
 use std::io::{self, BufRead, Cursor, Seek, SeekFrom, Write};
-use std::marker::PhantomData;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bytes::buf::Reader;
 use bytes::{Buf, Bytes};
@@ -62,11 +63,11 @@ const MAX_DELTAFRAME_RETRIES: u32 = 5;
 pub fn default_headers(app_id: u32) -> Result<http::HeaderMap, http::header::InvalidHeaderValue> {
     use http::header::{self, HeaderMap, HeaderValue};
 
-    let mut headers: HeaderMap = Default::default();
+    let mut headers: HeaderMap = HeaderMap::default();
 
     headers.insert(
         header::USER_AGENT,
-        format!("Valve/Steam HTTP Client 1.0 ({})", app_id).try_into()?,
+        format!("Valve/Steam HTTP Client 1.0 ({app_id})").try_into()?,
     );
     headers.insert(
         header::ACCEPT,
@@ -317,10 +318,7 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
                 }
 
                 let sleep_dur = fetch_after.duration_since(Instant::now());
-                #[cfg(feature = "tokio")]
                 tokio::time::sleep(sleep_dur).await;
-                #[cfg(not(feature = "tokio"))]
-                compile_error!("AAAAGH! can't sleep");
             }
 
             let start = Instant::now();
@@ -344,7 +342,6 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
 
                     return Ok(delta);
                 }
-
                 Err(BroadcastHttpClientError::StatusCode(http::StatusCode::NOT_FOUND)) => {
                     if num_retries >= MAX_DELTAFRAME_RETRIES {
                         return Err(BroadcastHttpClientError::StatusCode(
@@ -358,10 +355,7 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
                         catchup: false,
                     };
                     log::debug!("entering state: {:?}", self.stream_state);
-
-                    continue;
                 }
-
                 Err(source) => return Err(source),
             }
         }
@@ -396,7 +390,7 @@ impl<'client, C: HttpClient + 'client> BroadcastHttp<'client, C> {
                             .write_all(packet.as_ref())
                             // TODO: this should not panic. probably it's fine. there are very few
                             // things that could go wrong with Vec<u8> in rust.
-                            .expect("could not buffer");
+                            .ok()?;
                         // invalidate last tick so that it can be re-scanned if needed.
                         self.total_ticks = None;
                     }
@@ -505,13 +499,15 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
                     return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
                 }
 
-                // SAFETY: this is safe because lifetime of the returned slice is tied to the
-                // lifetime of r (if i'm not missing anything, am i?).
+                #[allow(
+                    unsafe_code,
+                    reason = "this is safe because lifetime of the returned slice is tied to the lifetime of r (if i'm not missing anything, am i?)."
+                )]
                 let data = unsafe {
                     // NOTE: start is 0 because Reader's advance will increase start position of
                     // the underlying slice
                     let ptr = bytes.as_ref()[0..size].as_ptr();
-                    std::slice::from_raw_parts(ptr, size)
+                    core::slice::from_raw_parts(ptr, size)
                 };
                 bytes.advance(size);
                 Ok(data)
@@ -536,7 +532,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     }
 
     fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
-        decode_cmd_send_tables(data)
+        Ok(decode_cmd_send_tables(data))
     }
 
     fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
@@ -544,7 +540,7 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     }
 
     fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
-        decode_cmd_packet(data)
+        Ok(decode_cmd_packet(data))
     }
 
     fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {

@@ -1,5 +1,5 @@
-use std::error::Error;
-use std::future::Future;
+use core::error::Error;
+use core::future::Future;
 
 use bytes::Bytes;
 
@@ -59,7 +59,7 @@ mod reqwest_impl {
             }
             // NOTE: expects should never be called - otherwise this is either http or reqwest
             // library error.
-            std::mem::swap(
+            core::mem::swap(
                 response.headers_mut(),
                 result.headers_mut().expect("could not get result headers"),
             );

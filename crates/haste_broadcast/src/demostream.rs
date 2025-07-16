@@ -23,9 +23,11 @@ pub(crate) fn read_cmd_header<R: Read>(mut rdr: R) -> Result<CmdHeader, ReadCmdH
         rdr.read_exact(&mut buf[..1])?;
         let cmd = buf[0];
         (
-            EDemoCommands::try_from(cmd as i32).map_err(|_| ReadCmdHeaderError::UnknownCmd {
-                raw: cmd as u32,
-                uncompressed: cmd as u32,
+            EDemoCommands::try_from(i32::from(cmd)).map_err(|_| {
+                ReadCmdHeaderError::UnknownCmd {
+                    raw: u32::from(cmd),
+                    uncompressed: u32::from(cmd),
+                }
             })?,
             size_of::<u8>(),
         )
@@ -58,26 +60,24 @@ pub(crate) fn read_cmd_header<R: Read>(mut rdr: R) -> Result<CmdHeader, ReadCmdH
 // cmd
 // ----
 
-#[inline]
-pub(crate) fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
-    Ok(CDemoSendTables {
+pub(crate) fn decode_cmd_send_tables(data: &[u8]) -> CDemoSendTables {
+    CDemoSendTables {
         // TODO: no-copy for send tables cmd
         // also think about how to do no-copy when decoding protobuf.
-        data: Some((&data[4..]).to_vec()),
-    })
+        data: Some(data[4..].to_vec()),
+    }
 }
 
 pub(crate) fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
     CDemoClassInfo::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
 }
 
-#[inline]
-pub(crate) fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
-    Ok(CDemoPacket {
+pub(crate) fn decode_cmd_packet(data: &[u8]) -> CDemoPacket {
+    CDemoPacket {
         // TODO: no-copy for packet cmd.
         // also think about how to do no-copy when decoding protobuf.
         data: Some(data.to_vec()),
-    })
+    }
 }
 
 pub(crate) fn decode_cmd_full_packet(_data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {
