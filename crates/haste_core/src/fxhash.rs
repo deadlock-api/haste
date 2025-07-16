@@ -59,7 +59,7 @@
 const GOLDEN_RATIO: u64 = 0x517cc1b727220a95;
 const ROTATION_LENGTH: u32 = 5;
 
-#[inline(always)]
+#[inline]
 pub const fn add_u64_to_hash(hash: u64, value: u64) -> u64 {
     (hash.rotate_left(ROTATION_LENGTH) ^ value).wrapping_mul(GOLDEN_RATIO)
 }

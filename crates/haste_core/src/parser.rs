@@ -1,20 +1,21 @@
+use std::future::Future;
 use std::io::{self, SeekFrom};
 
 use anyhow::Result;
+use prost::Message;
 use valveprotos::common::{
     CDemoFullPacket, CDemoPacket, CDemoStringTables, CsvcMsgCreateStringTable,
     CsvcMsgPacketEntities, CsvcMsgServerInfo, CsvcMsgUpdateStringTable, EDemoCommands, SvcMessages,
 };
-use valveprotos::prost::Message;
 
 use crate::bitreader::BitReader;
-use crate::demofile::{DemoHeaderError, DEMO_RECORD_BUFFER_SIZE};
+use crate::demofile::{DEMO_RECORD_BUFFER_SIZE, DemoHeaderError};
 use crate::demostream::{CmdHeader, DemoStream};
 use crate::entities::{DeltaHeader, Entity, EntityContainer};
 use crate::entityclasses::EntityClasses;
 use crate::fielddecoder::FieldDecodeContext;
 use crate::flattenedserializers::FlattenedSerializerContainer;
-use crate::instancebaseline::{InstanceBaseline, INSTANCE_BASELINE_TABLE_NAME};
+use crate::instancebaseline::{INSTANCE_BASELINE_TABLE_NAME, InstanceBaseline};
 use crate::stringtables::StringTableContainer;
 
 // as can be observed when dumping commands. also as specified in clarity
@@ -98,23 +99,33 @@ pub trait Visitor {
         ctx: &Context,
         delta_header: DeltaHeader,
         entity: &Entity,
-    ) -> Result<()> {
-        Ok(())
+    ) -> impl Future<Output = Result<()>> {
+        async { Ok(()) }
     }
 
     #[allow(unused_variables)]
-    fn on_cmd(&mut self, ctx: &Context, cmd_header: &CmdHeader, data: &[u8]) -> Result<()> {
-        Ok(())
+    fn on_cmd(
+        &mut self,
+        ctx: &Context,
+        cmd_header: &CmdHeader,
+        data: &[u8],
+    ) -> impl Future<Output = Result<()>> {
+        async { Ok(()) }
     }
 
     #[allow(unused_variables)]
-    fn on_packet(&mut self, ctx: &Context, packet_type: u32, data: &[u8]) -> Result<()> {
-        Ok(())
+    fn on_packet(
+        &mut self,
+        ctx: &Context,
+        packet_type: u32,
+        data: &[u8],
+    ) -> impl Future<Output = Result<()>> {
+        async { Ok(()) }
     }
 
     #[allow(unused_variables)]
-    fn on_tick_end(&mut self, ctx: &Context) -> Result<()> {
-        Ok(())
+    fn on_tick_end(&mut self, ctx: &Context) -> impl Future<Output = Result<()>> {
+        async { Ok(()) }
     }
 }
 
@@ -363,11 +374,11 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
         let mut br = BitReader::new(&data);
 
         while br.num_bits_left() > 8 {
-            let command = br.read_ubitvar();
-            let size = br.read_uvarint32() as usize;
+            let command = br.read_ubitvar()?;
+            let size = br.read_uvarint32()? as usize;
 
             let buf = &mut self.buf[..size];
-            br.read_bytes(buf);
+            br.read_bytes(buf)?;
             let buf: &_ = buf;
 
             self.visitor.on_packet(&self.ctx, command, buf)?;
@@ -494,9 +505,9 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             // TODO(blukai): maybe try to make naming consistent with valve; see
             // https://github.com/taylorfinnell/csgo-demoinfo/blob/74960c07c387b080a0965c4fc33d69ccf9bfe6c8/demoinfogo/demofiledump.cpp#L1153C18-L1153C29
             // and CL_ParseDeltaHeader in engine/client.cpp
-            entity_index += br.read_ubitvar() as i32 + 1;
+            entity_index += br.read_ubitvar()? as i32 + 1;
 
-            let delta_header = DeltaHeader::from_bit_reader(&mut br);
+            let delta_header = DeltaHeader::from_bit_reader(&mut br)?;
             match delta_header {
                 DeltaHeader::CREATE => {
                     let entity = unsafe {

@@ -23,7 +23,7 @@ pub enum ReadCmdHeaderError {
     #[error(transparent)]
     IoError(#[from] io::Error),
     #[error(transparent)]
-    ReadVarintError(#[from] varint::ReadVarintError),
+    ReadVarintError(#[from] varint::VarintError),
     #[error("unknown cmd (raw {raw}; uncompressed {uncompressed})")]
     UnknownCmd { raw: u32, uncompressed: u32 },
 }

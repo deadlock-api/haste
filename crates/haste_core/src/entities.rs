@@ -2,11 +2,12 @@ use std::fmt::{self, Binary};
 use std::hash::BuildHasherDefault;
 use std::rc::Rc;
 
-use hashbrown::hash_map::Entry;
+use dungers::bitbuf::BitError;
 use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 use nohash::NoHashHasher;
 
-use crate::bitreader::{BitReader, BitReaderOverflowError};
+use crate::bitreader::BitReader;
 use crate::entityclasses::EntityClasses;
 use crate::fielddecoder::FieldDecodeContext;
 use crate::fieldpath::{self, FieldPath};
@@ -190,12 +191,12 @@ impl DeltaHeader {
     // true -> true; FHDR_LEAVEPVS and FHDR_DELETE
     pub const DELETE: Self = Self(0b11);
 
-    #[inline(always)]
-    pub(crate) fn from_bit_reader(br: &mut BitReader) -> Self {
+    #[inline]
+    pub(crate) fn from_bit_reader(br: &mut BitReader) -> Result<Self, BitError> {
         // TODO(blukai): also try merging two bits from read_bool. who's faster?
         let mut buf = [0u8];
-        br.read_bits(&mut buf, 2);
-        Self(buf[0])
+        br.read_bits(&mut buf, 2)?;
+        Ok(Self(buf[0]))
     }
 }
 
@@ -218,11 +219,11 @@ impl Entity {
         field_decode_ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
         fps: &mut [FieldPath],
-    ) -> Result<(), BitReaderOverflowError> {
+    ) -> Result<(), BitError> {
         // eprintln!("-- {:?}", self.serializer.serializer_name);
 
         unsafe {
-            let fp_count = fieldpath::read_field_paths(br, fps);
+            let fp_count = fieldpath::read_field_paths(br, fps)?;
             for i in 0..fp_count {
                 let fp = fps.get_unchecked(i);
 
@@ -253,7 +254,7 @@ impl Entity {
 
                 // eprint!("{:?} {:?} ", field.var_name, field.var_type);
 
-                let field_value = field.metadata.decoder.decode(field_decode_ctx, br);
+                let field_value = field.metadata.decoder.decode(field_decode_ctx, br)?;
 
                 // eprintln!(" -> {:?}", &field_value);
 
@@ -377,8 +378,8 @@ impl EntityContainer {
         entity_classes: &EntityClasses,
         instance_baseline: &InstanceBaseline,
         serializers: &FlattenedSerializerContainer,
-    ) -> Result<&Entity, BitReaderOverflowError> {
-        let class_id = br.read_ubit64(entity_classes.bits) as i32;
+    ) -> Result<&Entity, BitError> {
+        let class_id = br.read_ubit64(entity_classes.bits)? as i32;
         let _serial = br.read_ubit64(NUM_SERIAL_NUM_BITS as usize);
         let _unknown = br.read_uvarint32();
 
@@ -440,7 +441,7 @@ impl EntityContainer {
         index: i32,
         field_decode_ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
-    ) -> Result<&Entity, BitReaderOverflowError> {
+    ) -> Result<&Entity, BitError> {
         let entity = self.entities.get_mut(&index);
 
         debug_assert!(

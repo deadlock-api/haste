@@ -4,5 +4,5 @@ pub(crate) mod demostream;
 mod httpclient;
 
 pub use broadcastfile::BroadcastFile;
-pub use broadcasthttp::{default_headers, BroadcastHttp, BroadcastHttpClientError};
+pub use broadcasthttp::{BroadcastHttp, BroadcastHttpClientError, default_headers};
 pub use httpclient::HttpClient;

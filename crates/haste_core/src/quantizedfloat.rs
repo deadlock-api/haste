@@ -1,3 +1,5 @@
+use dungers::bitbuf::BitError;
+
 use crate::bitreader::BitReader;
 
 // NOTE: this is composite of stuff from butterfly, clarity, manta and leaked csgo.
@@ -238,21 +240,21 @@ impl QuantizedFloat {
         self.low_value + range * (i as f32 * self.decode_mul)
     }
 
-    pub(crate) fn decode(&self, br: &mut BitReader) -> f32 {
-        if (self.encode_flags & QFE_ROUNDDOWN) != 0 && br.read_bool() {
-            return self.low_value;
+    pub(crate) fn decode(&self, br: &mut BitReader) -> Result<f32, BitError> {
+        if (self.encode_flags & QFE_ROUNDDOWN) != 0 && br.read_bool()? {
+            return Ok(self.low_value);
         }
 
-        if (self.encode_flags & QFE_ROUNDUP) != 0 && br.read_bool() {
-            return self.high_value;
+        if (self.encode_flags & QFE_ROUNDUP) != 0 && br.read_bool()? {
+            return Ok(self.high_value);
         }
 
-        if (self.encode_flags & QFE_ENCODE_ZERO_EXACTLY) != 0 && br.read_bool() {
-            return 0.0;
+        if (self.encode_flags & QFE_ENCODE_ZERO_EXACTLY) != 0 && br.read_bool()? {
+            return Ok(0.0);
         }
 
         let range = self.high_value - self.low_value;
-        let value = br.read_ubit64(self.bit_count as usize);
-        self.low_value + range * (value as f32 * self.decode_mul)
+        let value = br.read_ubit64(self.bit_count as usize)?;
+        Ok(self.low_value + range * (value as f32 * self.decode_mul))
     }
 }

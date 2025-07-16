@@ -41,7 +41,7 @@ impl EntityClasses {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn by_id_unckecked(&self, class_id: i32) -> &ClassInfo {
         self.class_infos.get_unchecked(class_id as usize)
     }

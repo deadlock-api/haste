@@ -1,18 +1,20 @@
 use std::hash::BuildHasherDefault;
 use std::rc::Rc;
 
+use dungers::bitbuf::BitError;
 use dungers::varint;
-use hashbrown::hash_map::Values;
+use dungers::varint::VarintError;
 use hashbrown::HashMap;
+use hashbrown::hash_map::Values;
 use nohash::NoHashHasher;
+use prost::{self, Message};
 use valveprotos::common::{
     CDemoSendTables, CsvcMsgFlattenedSerializer, ProtoFlattenedSerializerFieldT,
     ProtoFlattenedSerializerT,
 };
-use valveprotos::prost::{self, Message};
 
 use crate::fieldmetadata::{
-    get_field_metadata, FieldMetadata, FieldMetadataError, FieldSpecialDescriptor,
+    FieldMetadata, FieldMetadataError, FieldSpecialDescriptor, get_field_metadata,
 };
 use crate::fxhash;
 
@@ -21,7 +23,9 @@ pub enum FlattenedSerializersError {
     #[error(transparent)]
     DecodeError(#[from] prost::DecodeError),
     #[error(transparent)]
-    ReadVarintError(#[from] varint::ReadVarintError),
+    BitError(#[from] BitError),
+    #[error(transparent)]
+    VarintError(#[from] VarintError),
     #[error(transparent)]
     FieldMetadataError(#[from] FieldMetadataError),
 }
@@ -39,7 +43,7 @@ pub struct Symbol {
 }
 
 impl From<&String> for Symbol {
-    #[inline(always)]
+    #[inline]
     fn from(value: &String) -> Self {
         Self {
             hash: fxhash::hash_bytes(value.as_bytes()),
@@ -127,7 +131,7 @@ impl FlattenedSerializerField {
         Ok(ret)
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) unsafe fn get_child_unchecked(&self, index: usize) -> &Self {
         let fs = self.field_serializer.as_ref();
 
@@ -144,12 +148,12 @@ impl FlattenedSerializerField {
             .and_then(|fs| fs.get_child(index))
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn var_encoder_heq(&self, rhs: u64) -> bool {
         self.var_encoder.as_ref().is_some_and(|lhs| lhs.hash == rhs)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_dynamic_array(&self) -> bool {
         self.metadata
             .special_descriptor
@@ -193,7 +197,7 @@ impl FlattenedSerializer {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) unsafe fn get_child_unchecked(&self, index: usize) -> &FlattenedSerializerField {
         debug_assert!(
             self.fields.get(index).is_some(),
@@ -321,12 +325,12 @@ impl FlattenedSerializerContainer {
 
     // TODO: think about exposing the whole serializer map
 
-    #[inline(always)]
+    #[inline]
     pub fn by_name_hash(&self, serializer_name_hash: u64) -> Option<Rc<FlattenedSerializer>> {
         self.serializer_map.get(&serializer_name_hash).cloned()
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn by_name_hash_unckecked(
         &self,
         serializer_name_hash: u64,

@@ -68,7 +68,7 @@ pub(crate) enum FieldSpecialDescriptor {
 }
 
 impl FieldSpecialDescriptor {
-    #[inline(always)]
+    #[inline]
     pub(crate) fn is_dynamic_array(&self) -> bool {
         matches!(
             self,

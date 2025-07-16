@@ -14,7 +14,7 @@ use valveprotos::common::{
 // thanks to saul for figuring it out. see
 // https://github.com/saul/demofile-net/blob/7d3d59e478dbd2b000f4efa2dac70ed1bf2e2b7f/src/DemoFile/HttpBroadcastReader.cs#L150
 
-#[inline(always)]
+#[inline]
 pub(crate) fn read_cmd_header<R: Read>(mut rdr: R) -> Result<CmdHeader, ReadCmdHeaderError> {
     // TODO: bytereader (bitreader-like) + migrate read_exact and similar instalces across the code
     // base to it (valve have CUtlBuffer for reference to make api similar).
@@ -59,7 +59,7 @@ pub(crate) fn read_cmd_header<R: Read>(mut rdr: R) -> Result<CmdHeader, ReadCmdH
 // cmd
 // ----
 
-#[inline(always)]
+#[inline]
 pub(crate) fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
     Ok(CDemoSendTables {
         // TODO: no-copy for send tables cmd
@@ -68,12 +68,12 @@ pub(crate) fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, Dec
     })
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
     CDemoClassInfo::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
     Ok(CDemoPacket {
         // TODO: no-copy for packet cmd.
@@ -82,7 +82,7 @@ pub(crate) fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdErr
     })
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn decode_cmd_full_packet(_data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {
     // NOTE: broadcasts don't seem to contain full packets
     unreachable!()

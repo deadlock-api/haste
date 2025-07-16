@@ -30,12 +30,12 @@ pub struct Tokenizer<'a> {
     cursor: Charsor<'a>,
 }
 
-#[inline(always)]
+#[inline]
 fn is_ident_start(ch: char) -> bool {
     ch.is_ascii_alphabetic()
 }
 
-#[inline(always)]
+#[inline]
 fn is_ident_continue(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
@@ -85,7 +85,7 @@ impl<'a> Tokenizer<'a> {
         self.cursor.eat_while(|ch| ch.is_whitespace());
     }
 
-    #[inline(always)]
+    #[inline]
     fn next_token(&mut self) -> Option<Result<Token<'a>, Error>> {
         loop {
             let Some(ch) = self.cursor.next() else {

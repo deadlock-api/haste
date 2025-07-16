@@ -3,9 +3,11 @@ use std::hash::BuildHasherDefault;
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 
+use dungers::bitbuf::BitError;
 use hashbrown::HashMap;
 use nohash::NoHashHasher;
-use valveprotos::common::{c_demo_string_tables, CDemoStringTables};
+use thiserror::Error;
+use valveprotos::common::{CDemoStringTables, c_demo_string_tables};
 
 use crate::bitreader::BitReader;
 
@@ -36,6 +38,14 @@ impl StringHistoryEntry {
 
 const MAX_USERDATA_BITS: usize = 17;
 const MAX_USERDATA_SIZE: usize = 1 << MAX_USERDATA_BITS;
+
+#[derive(Error, Debug)]
+pub enum StringTableError {
+    #[error(transparent)]
+    Decompress(#[from] snap::Error),
+    #[error(transparent)]
+    BitReader(#[from] BitError),
+}
 
 #[derive(Debug)]
 pub struct StringTableItem {
@@ -69,7 +79,7 @@ impl StringTable {
         flags: i32,
         using_varint_bitcounts: bool,
     ) -> Self {
-        #[inline(always)]
+        #[inline]
         unsafe fn make_vec<T>(size: usize) -> Vec<T> {
             let mut vec = Vec::with_capacity(size);
             vec.set_len(size);
@@ -100,7 +110,7 @@ impl StringTable {
         &mut self,
         br: &mut BitReader,
         num_entries: i32,
-    ) -> Result<(), snap::Error> {
+    ) -> Result<(), StringTableError> {
         let mut entry_index: i32 = -1;
 
         // TODO: feature flag or something for a static allocation of history,
@@ -134,13 +144,13 @@ impl StringTable {
             // or has a fixed index position. A fixed index position of zero
             // should be the last data in the buffer, and indicates that all
             // data has been read.
-            entry_index = if br.read_bool() {
+            entry_index = if br.read_bool()? {
                 entry_index + 1
             } else {
-                br.read_uvarint32() as i32 + 1
+                br.read_uvarint32()? as i32 + 1
             };
 
-            let has_string = br.read_bool();
+            let has_string = br.read_bool()?;
             let string = if has_string {
                 let mut size: usize = 0;
 
@@ -149,7 +159,7 @@ impl StringTable {
                 // position and size from the buffer, then use those to build
                 // the string combined with an extra string read (null
                 // terminated). Alternatively, just read the string.
-                if br.read_bool() {
+                if br.read_bool()? {
                     // NOTE: valve uses their CUtlVector which shifts elements
                     // to the left on delete. they maintain max len of 32. they
                     // don't allow history to grow beyond 32 elements, once it
@@ -162,15 +172,16 @@ impl StringTable {
                         history_delta_zero = history_delta_index & HISTORY_BITMASK;
                     };
 
-                    let index = (history_delta_zero + br.read_ubit64(5) as usize) & HISTORY_BITMASK;
-                    let bytestocopy = br.read_ubit64(MAX_STRING_BITS) as usize;
+                    let index =
+                        (history_delta_zero + br.read_ubit64(5)? as usize) & HISTORY_BITMASK;
+                    let bytestocopy = br.read_ubit64(MAX_STRING_BITS)? as usize;
                     size += bytestocopy;
 
                     string_buf[..bytestocopy]
                         .copy_from_slice(&history[index].string[..bytestocopy]);
-                    size += br.read_string(&mut string_buf[bytestocopy..], false);
+                    size += br.read_string(&mut string_buf[bytestocopy..], false)?;
                 } else {
-                    size += br.read_string(string_buf, false);
+                    size += br.read_string(string_buf, false)?;
                 }
 
                 let mut she = unsafe { StringHistoryEntry::new_uninit() };
@@ -184,28 +195,28 @@ impl StringTable {
                 None
             };
 
-            let has_user_data = br.read_bool();
+            let has_user_data = br.read_bool()?;
             let user_data = if has_user_data {
                 if self.user_data_fixed_size {
                     // Don't need to read length, it's fixed length and the length was networked down already.
-                    br.read_bits(user_data_buf, self.user_data_size_bits as usize);
+                    br.read_bits(user_data_buf, self.user_data_size_bits as usize)?;
                     Some(&user_data_buf[..self.user_data_size as usize])
                 } else {
                     let mut is_compressed = false;
                     if (self.flags & 0x1) != 0 {
-                        is_compressed = br.read_bool();
+                        is_compressed = br.read_bool()?;
                     }
 
                     // NOTE: using_varint_bitcounts bool was introduced in the
                     // new frontiers update on smaypril twemmieth of 2023,
                     // https://github.com/SteamDatabase/GameTracking-Dota2/commit/8851e24f0e3ef0b618e3a60d276a3b0baf88568c#diff-79c9dd229c77c85f462d6d85e29a65f5daf6bf31f199554438d42bd643e89448R405
                     let size = if self.using_varint_bitcounts {
-                        br.read_ubitvar() as usize
+                        br.read_ubitvar()? as usize
                     } else {
-                        br.read_ubit64(MAX_USERDATA_BITS) as usize
+                        br.read_ubit64(MAX_USERDATA_BITS)? as usize
                     };
 
-                    br.read_bytes(&mut user_data_buf[..size]);
+                    br.read_bytes(&mut user_data_buf[..size])?;
 
                     if is_compressed {
                         snap::raw::Decoder::new()

@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt::Debug;
 
+use dungers::bitbuf::BitError;
 use lazy_static::lazy_static;
 
 use crate::bitreader::BitReader;
@@ -25,7 +26,7 @@ pub struct FieldPath {
 }
 
 impl Default for FieldPath {
-    #[inline(always)]
+    #[inline]
     fn default() -> Self {
         Self {
             data: [255, 0, 0, 0, 0, 0, 0],
@@ -38,23 +39,23 @@ impl Default for FieldPath {
 impl FieldPath {
     // ops
 
-    #[inline(always)]
+    #[inline]
     fn inc_at(&mut self, i: usize, v: i32) {
         self.data[i] = ((self.data[i] as i32 + v) & 0xFF) as u8;
     }
 
-    #[inline(always)]
+    #[inline]
     fn inc_last(&mut self, v: i32) {
         self.inc_at(self.last, v);
     }
 
-    #[inline(always)]
+    #[inline]
     fn push(&mut self, v: i32) {
         self.last += 1;
         self.data[self.last] = (v & 0xFF) as u8;
     }
 
-    #[inline(always)]
+    #[inline]
     fn pop(&mut self, n: usize) {
         for _ in 0..n {
             self.data[self.last] = 0;
@@ -64,7 +65,7 @@ impl FieldPath {
 
     // internal apis
 
-    #[inline(always)]
+    #[inline]
     pub(crate) unsafe fn get_unchecked(&self, index: usize) -> usize {
         *self.data.get_unchecked(index) as usize
     }
@@ -89,272 +90,345 @@ impl FieldPath {
     }
 }
 
-type FieldOp = fn(&mut FieldPath, &mut BitReader);
+type FieldOp = fn(&mut FieldPath, &mut BitReader) -> Result<(), BitError>;
 
 // PlusOne
-fn plus_one(fp: &mut FieldPath, _br: &mut BitReader) {
+fn plus_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(1);
+    Ok(())
 }
 
 // PlusTwo
-fn plus_two(fp: &mut FieldPath, _br: &mut BitReader) {
+fn plus_two(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(2);
+    Ok(())
 }
 
 // PlusThree
-fn plus_three(fp: &mut FieldPath, _br: &mut BitReader) {
+fn plus_three(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(3);
+    Ok(())
 }
 
 // PlusFour
-fn plus_four(fp: &mut FieldPath, _br: &mut BitReader) {
+fn plus_four(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(4);
+    Ok(())
 }
 
 // PlusN
-fn plus_n(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvarfp() as i32 + 5);
+fn plus_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvarfp()? as i32 + 5);
+    Ok(())
 }
 
 // PushOneLeftDeltaZeroRightZero
-fn push_one_left_delta_zero_right_zero(fp: &mut FieldPath, _br: &mut BitReader) {
+fn push_one_left_delta_zero_right_zero(
+    fp: &mut FieldPath,
+    _br: &mut BitReader,
+) -> Result<(), BitError> {
     fp.push(0);
+    Ok(())
 }
 
 // PushOneLeftDeltaZeroRightNonZero
-fn push_one_left_delta_zero_right_non_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.push(br.read_ubitvarfp() as i32);
+fn push_one_left_delta_zero_right_non_zero(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushOneLeftDeltaOneRightZero
-fn push_one_left_delta_one_right_zero(fp: &mut FieldPath, _br: &mut BitReader) {
+fn push_one_left_delta_one_right_zero(
+    fp: &mut FieldPath,
+    _br: &mut BitReader,
+) -> Result<(), BitError> {
     fp.inc_last(1);
     fp.push(0);
+    Ok(())
 }
 
 // PushOneLeftDeltaOneRightNonZero
-fn push_one_left_delta_one_right_non_zero(fp: &mut FieldPath, br: &mut BitReader) {
+fn push_one_left_delta_one_right_non_zero(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
     fp.inc_last(1);
-    fp.push(br.read_ubitvarfp() as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushOneLeftDeltaNRightZero
-fn push_one_left_delta_n_right_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvarfp() as i32);
+fn push_one_left_delta_n_right_zero(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvarfp()? as i32);
     fp.push(0);
+    Ok(())
 }
 
 // PushOneLeftDeltaNRightNonZero
-fn push_one_left_delta_n_right_non_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvarfp() as i32 + 2);
-    fp.push(br.read_ubitvarfp() as i32 + 1);
+fn push_one_left_delta_n_right_non_zero(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvarfp()? as i32 + 2);
+    fp.push(br.read_ubitvarfp()? as i32 + 1);
+    Ok(())
 }
 
 // PushOneLeftDeltaNRightNonZeroPack6Bits
-fn push_one_left_delta_n_right_non_zero_pack6_bits(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubit64(3) as i32 + 2);
-    fp.push(br.read_ubit64(3) as i32 + 1);
+fn push_one_left_delta_n_right_non_zero_pack6_bits(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubit64(3)? as i32 + 2);
+    fp.push(br.read_ubit64(3)? as i32 + 1);
+    Ok(())
 }
 
 // PushOneLeftDeltaNRightNonZeroPack8Bits
-fn push_one_left_delta_n_right_non_zero_pack8_bits(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubit64(4) as i32 + 2);
-    fp.push(br.read_ubit64(4) as i32 + 1);
+fn push_one_left_delta_n_right_non_zero_pack8_bits(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubit64(4)? as i32 + 2);
+    fp.push(br.read_ubit64(4)? as i32 + 1);
+    Ok(())
 }
 
 // PushTwoLeftDeltaZero
-fn push_two_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
+fn push_two_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushTwoLeftDeltaOne
-fn push_two_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) {
+fn push_two_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(1);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushTwoLeftDeltaN
-fn push_two_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvar() as i32 + 2);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
+fn push_two_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvar()? as i32 + 2);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushTwoPack5LeftDeltaZero
-fn push_two_pack5_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
+fn push_two_pack5_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    Ok(())
 }
 
 // PushTwoPack5LeftDeltaOne
-fn push_two_pack5_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) {
+fn push_two_pack5_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(1);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    Ok(())
 }
 
 // PushTwoPack5LeftDeltaN
-fn push_two_pack5_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvar() as i32 + 2);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
+fn push_two_pack5_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvar()? as i32 + 2);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    Ok(())
 }
 
 // PushThreeLeftDeltaZero
-fn push_three_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
+fn push_three_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushThreeLeftDeltaOne
-fn push_three_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) {
+fn push_three_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(1);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushThreeLeftDeltaN
-fn push_three_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvar() as i32 + 2);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
-    fp.push(br.read_ubitvarfp() as i32);
+fn push_three_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvar()? as i32 + 2);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    fp.push(br.read_ubitvarfp()? as i32);
+    Ok(())
 }
 
 // PushThreePack5LeftDeltaZero
-fn push_three_pack5_left_delta_zero(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
+fn push_three_pack5_left_delta_zero(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    Ok(())
 }
 
 // PushThreePack5LeftDeltaOne
-fn push_three_pack5_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) {
+fn push_three_pack5_left_delta_one(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_last(1);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    Ok(())
 }
 
 // PushThreePack5LeftDeltaN
-fn push_three_pack5_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.inc_last(br.read_ubitvar() as i32 + 2);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
-    fp.push(br.read_ubit64(5) as i32);
+fn push_three_pack5_left_delta_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.inc_last(br.read_ubitvar()? as i32 + 2);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    fp.push(br.read_ubit64(5)? as i32);
+    Ok(())
 }
 
 // PushN
-fn push_n(fp: &mut FieldPath, br: &mut BitReader) {
-    let n = br.read_ubitvar() as usize;
-    fp.inc_last(br.read_ubitvar() as i32);
+fn push_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    let n = br.read_ubitvar()? as usize;
+    fp.inc_last(br.read_ubitvar()? as i32);
     for _ in 0..n {
-        fp.push(br.read_ubitvarfp() as i32);
+        fp.push(br.read_ubitvarfp()? as i32);
     }
+    Ok(())
 }
 
 // PushNAndNonTopographical
-fn push_n_and_non_topographical(fp: &mut FieldPath, br: &mut BitReader) {
+fn push_n_and_non_topographical(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     for i in 0..=fp.last {
-        if br.read_bool() {
-            fp.inc_at(i, br.read_varint32() + 1);
+        if br.read_bool()? {
+            fp.inc_at(i, br.read_varint32()? + 1);
         }
     }
-    let n = br.read_ubitvar() as usize;
+    let n = br.read_ubitvar()? as usize;
     for _ in 0..n {
-        fp.push(br.read_ubitvarfp() as i32);
+        fp.push(br.read_ubitvarfp()? as i32);
     }
+    Ok(())
 }
 
 // PopOnePlusOne
-fn pop_one_plus_one(fp: &mut FieldPath, _br: &mut BitReader) {
+fn pop_one_plus_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.pop(1);
     fp.inc_last(1);
+    Ok(())
 }
 
 // PopOnePlusN
-fn pop_one_plus_n(fp: &mut FieldPath, br: &mut BitReader) {
+fn pop_one_plus_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     fp.pop(1);
-    fp.inc_last(br.read_ubitvarfp() as i32 + 1);
+    fp.inc_last(br.read_ubitvarfp()? as i32 + 1);
+    Ok(())
 }
 
 // PopAllButOnePlusOne
-fn pop_all_but_one_plus_one(fp: &mut FieldPath, _br: &mut BitReader) {
+fn pop_all_but_one_plus_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.pop(fp.last);
     fp.inc_last(1);
+    Ok(())
 }
 
 // PopAllButOnePlusN
-fn pop_all_but_one_plus_n(fp: &mut FieldPath, br: &mut BitReader) {
+fn pop_all_but_one_plus_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     fp.pop(fp.last);
-    fp.inc_last(br.read_ubitvarfp() as i32 + 1);
+    fp.inc_last(br.read_ubitvarfp()? as i32 + 1);
+    Ok(())
 }
 
 // PopAllButOnePlusNPack3Bits
-fn pop_all_but_one_plus_n_pack3_bits(fp: &mut FieldPath, br: &mut BitReader) {
+fn pop_all_but_one_plus_n_pack3_bits(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
     fp.pop(fp.last);
-    fp.inc_last(br.read_ubit64(3) as i32 + 1);
+    fp.inc_last(br.read_ubit64(3)? as i32 + 1);
+    Ok(())
 }
 
 // PopAllButOnePlusNPack6Bits
-fn pop_all_but_one_plus_n_pack6_bits(fp: &mut FieldPath, br: &mut BitReader) {
+fn pop_all_but_one_plus_n_pack6_bits(
+    fp: &mut FieldPath,
+    br: &mut BitReader,
+) -> Result<(), BitError> {
     fp.pop(fp.last);
-    fp.inc_last(br.read_ubit64(6) as i32 + 1);
+    fp.inc_last(br.read_ubit64(6)? as i32 + 1);
+    Ok(())
 }
 
 // PopNPlusOne
-fn pop_n_plus_one(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.pop(br.read_ubitvarfp() as usize);
+fn pop_n_plus_one(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.pop(br.read_ubitvarfp()? as usize);
     fp.inc_last(1);
+    Ok(())
 }
 
 // PopNPlusN
-fn pop_n_plus_n(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.pop(br.read_ubitvarfp() as usize);
-    fp.inc_last(br.read_varint32());
+fn pop_n_plus_n(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.pop(br.read_ubitvarfp()? as usize);
+    fp.inc_last(br.read_varint32()?);
+    Ok(())
 }
 
 // PopNAndNonTopographical
-fn pop_n_and_non_topographical(fp: &mut FieldPath, br: &mut BitReader) {
-    fp.pop(br.read_ubitvarfp() as usize);
+fn pop_n_and_non_topographical(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
+    fp.pop(br.read_ubitvarfp()? as usize);
     for i in 0..=fp.last {
-        if br.read_bool() {
-            fp.inc_at(i, br.read_varint32());
+        if br.read_bool()? {
+            fp.inc_at(i, br.read_varint32()?);
         }
     }
+    Ok(())
 }
 
 // NonTopoComplex
-fn non_topo_complex(fp: &mut FieldPath, br: &mut BitReader) {
+fn non_topo_complex(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     for i in 0..=fp.last {
-        if br.read_bool() {
-            fp.inc_at(i, br.read_varint32());
+        if br.read_bool()? {
+            fp.inc_at(i, br.read_varint32()?);
         }
     }
+    Ok(())
 }
 
 // NonTopoPenultimatePluseOne
-fn non_topo_penultimate_pluse_one(fp: &mut FieldPath, _br: &mut BitReader) {
+fn non_topo_penultimate_pluse_one(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     fp.inc_at(fp.last - 1, 1);
+    Ok(())
 }
 
 // NonTopoComplexPack4Bits
-fn non_topo_complex_pack4_bits(fp: &mut FieldPath, br: &mut BitReader) {
+fn non_topo_complex_pack4_bits(fp: &mut FieldPath, br: &mut BitReader) -> Result<(), BitError> {
     for i in 0..=fp.last {
-        if br.read_bool() {
-            fp.inc_at(i, br.read_ubit64(4) as i32 - 7);
+        if br.read_bool()? {
+            fp.inc_at(i, br.read_ubit64(4)? as i32 - 7);
         }
     }
+    Ok(())
 }
 
 // FieldPathEncodeFinish
-fn field_path_encode_finish(fp: &mut FieldPath, _br: &mut BitReader) {
+fn field_path_encode_finish(fp: &mut FieldPath, _br: &mut BitReader) -> Result<(), BitError> {
     // NOCOMMIT
-    fp.finished = true
+    fp.finished = true;
+    Ok(())
 }
 
 // NOTE: for some random reference, manual rust vtable impls:
@@ -633,7 +707,10 @@ lazy_static! {
     static ref FIELDOP_HIERARCHY: Node<FieldOp> = build_fieldop_hierarchy();
 }
 
-pub(crate) fn read_field_paths(br: &mut BitReader, fps: &mut [FieldPath]) -> usize {
+pub(crate) fn read_field_paths(
+    br: &mut BitReader,
+    fps: &mut [FieldPath],
+) -> Result<usize, BitError> {
     // NOTE: majority of field path reads are shorter then 32 (but some are beyond thousand).
 
     // it is more efficient to walk huffman tree, then to do static lookups by first accumulating
@@ -657,7 +734,7 @@ pub(crate) fn read_field_paths(br: &mut BitReader, fps: &mut [FieldPath]) -> usi
     let mut root: &Node<FieldOp> = &FIELDOP_HIERARCHY;
 
     loop {
-        let next = if br.read_bool() {
+        let next = if br.read_bool()? {
             root.unwrap_right_branch()
         } else {
             root.unwrap_left_branch()
@@ -666,9 +743,9 @@ pub(crate) fn read_field_paths(br: &mut BitReader, fps: &mut [FieldPath]) -> usi
         root = if let Node::Leaf { value: op, .. } = next {
             // NOTE: this is not any worse then a method call (on a struct for example), right?
             // because what vtables contain? they contain pointers.
-            (op)(&mut fp, br);
+            (op)(&mut fp, br)?;
             if fp.finished {
-                return i;
+                return Ok(i);
             }
             fps[i] = fp.clone();
 

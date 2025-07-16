@@ -1,11 +1,11 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
 use dungers::varint;
+use prost;
 use prost::Message;
 use valveprotos::common::{
     CDemoClassInfo, CDemoFileInfo, CDemoFullPacket, CDemoPacket, CDemoSendTables, EDemoCommands,
 };
-use valveprotos::prost;
 
 use crate::demostream::{CmdHeader, DecodeCmdError, DemoStream, ReadCmdError, ReadCmdHeaderError};
 
@@ -193,22 +193,22 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError> {
         CDemoSendTables::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    #[inline(always)]
+    #[inline]
     fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError> {
         CDemoClassInfo::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    #[inline(always)]
+    #[inline]
     fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError> {
         CDemoPacket::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    #[inline(always)]
+    #[inline]
     fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError> {
         CDemoFullPacket::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
