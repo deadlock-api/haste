@@ -54,6 +54,29 @@ pub struct StringTableItem {
     pub user_data: Option<Arc<SyncUnsafeCell<Vec<u8>>>>,
 }
 
+impl StringTableItem {
+    pub fn get_string(&self) -> Option<&[u8]> {
+        self.string.as_ref().map(|v| v.as_slice())
+    }
+
+    pub fn get_user_data(&self) -> Option<Vec<u8>> {
+        self.user_data.as_ref().map(|arc_cell| {
+            // This is an unsafe block because we are accessing the inner data
+            // through a raw pointer. We must ensure that this access is
+            // sound (e.g., no other thread is writing to it at the same time).
+            #[allow(unsafe_code)]
+            unsafe {
+                // Get the raw pointer to the inner Vec<u8>
+                let ptr = arc_cell.get();
+                // Dereference the pointer to get a reference to the Vec<u8>
+                let vec_ref = &*ptr;
+                // Clone the Vec<u8> to create a new, owned copy
+                vec_ref.clone()
+            }
+        })
+    }
+}
+
 pub struct StringTable {
     name: Box<str>,
     user_data_fixed_size: bool,
