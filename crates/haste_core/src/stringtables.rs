@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use nohash::NoHashHasher;
 use sync_unsafe_cell::SyncUnsafeCell;
 use thiserror::Error;
-use valveprotos::common::{CDemoStringTables, c_demo_string_tables};
+use valveprotos::common::{c_demo_string_tables, CDemoStringTables};
 
 use crate::bitreader::BitReader;
 
@@ -55,10 +55,12 @@ pub struct StringTableItem {
 }
 
 impl StringTableItem {
+    #[must_use]
     pub fn get_string(&self) -> Option<&[u8]> {
-        self.string.as_ref().map(|v| v.as_slice())
+        self.string.as_deref()
     }
 
+    #[must_use]
     pub fn get_user_data(&self) -> Option<Vec<u8>> {
         self.user_data.as_ref().map(|arc_cell| {
             // This is an unsafe block because we are accessing the inner data
@@ -321,7 +323,7 @@ impl StringTable {
         self.name.as_ref()
     }
 
-    pub fn items(&self) -> impl Iterator<Item = (&i32, &StringTableItem)> {
+    pub fn items(&self) -> impl Iterator<Item=(&i32, &StringTableItem)> {
         self.items.iter()
     }
 
@@ -434,7 +436,7 @@ impl StringTableContainer {
     // void RestoreTick( int tick );
 
     // TODO: rename to iter?
-    pub fn tables(&self) -> impl Iterator<Item = &StringTable> {
+    pub fn tables(&self) -> impl Iterator<Item=&StringTable> {
         self.tables.iter()
     }
 }
