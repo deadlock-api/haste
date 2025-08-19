@@ -196,10 +196,8 @@ impl FieldDecode for StringDecoder {
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError> {
         let n = br.read_string(&mut ctx.string_buf, false)?;
-        // TODO(blukai): should string conversion be actually checked? why not?
-        Ok(FieldValue::String(Box::<str>::from(core::str::from_utf8(
-            &ctx.string_buf[..n],
-        )?)))
+        let string = String::from_utf8_lossy(&ctx.string_buf[..n]);
+        Ok(FieldValue::String(Box::<str>::from(string.as_ref())))
     }
 }
 
