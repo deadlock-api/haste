@@ -202,9 +202,7 @@ impl FieldDecode for StringDecoder {
         if ctx.string_buf.is_empty() {
             return Ok(FieldValue::String(Box::<str>::default()));
         }
-        let Ok(n) = br.read_string(&mut ctx.string_buf, false) else {
-            return Ok(FieldValue::String(Box::<str>::default()));
-        };
+        let n = br.read_string(&mut ctx.string_buf, false)?;
         let string = String::from_utf8_lossy(&ctx.string_buf[..n]);
         Ok(FieldValue::String(Box::<str>::from(string.as_ref())))
     }
