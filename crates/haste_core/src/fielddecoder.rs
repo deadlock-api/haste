@@ -29,14 +29,19 @@ pub enum DecoderError {
 // NOTE(blukai): all pieces of public code define DT_MAX_STRING_BITS to 9, but that does not appear
 // to be enough for deadlock (the game):
 // https://github.com/blukai/haste/issues/4
-const DT_MAX_STRING_BITS: u32 = 10;
+//
+// deadlock's `CCitadelPlayerPawn` entity has a field `m_sHeroBuildSerialized` of type
+// `CUtlString`, but this does not appear to be a valid utf8 string, but as the name suggests some
+// serialized data.
+// for more info on that see FieldValue::String's comment.
+const DT_MAX_STRING_BITS: u32 = 9;
 /// maximum length of a string that can be sent.
 const DT_MAX_STRING_BUFFERSIZE: u32 = 1 << DT_MAX_STRING_BITS;
 
 #[derive(Debug)]
 pub(crate) struct FieldDecodeContext {
     pub(crate) tick_interval: f32,
-    pub(crate) string_buf: [u8; DT_MAX_STRING_BUFFERSIZE as usize],
+    pub(crate) string_buf: Vec<u8>,
 }
 
 impl Default for FieldDecodeContext {
@@ -45,7 +50,7 @@ impl Default for FieldDecodeContext {
             // NOTE(blukai): tick interval needs to be read from SvcServerInfo packet message. it
             // becomes available "later"; it is okay to initialize it to 0.0.
             tick_interval: 0.0,
-            string_buf: [0u8; DT_MAX_STRING_BUFFERSIZE as usize],
+            string_buf: Vec::with_capacity(DT_MAX_STRING_BUFFERSIZE as usize),
         }
     }
 }
@@ -199,12 +204,12 @@ impl FieldDecode for StringDecoder {
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError> {
-        if ctx.string_buf.is_empty() {
-            return Ok(FieldValue::String(Box::<str>::default()));
-        }
-        let n = br.read_string(&mut ctx.string_buf, false)?;
-        let string = String::from_utf8_lossy(&ctx.string_buf[..n]);
-        Ok(FieldValue::String(Box::<str>::from(string.as_ref())))
+        // NOTE: string_buf must be cleared after use.
+        assert!(ctx.string_buf.is_empty());
+        let n = br.read_string_to_end(&mut ctx.string_buf, false)?;
+        let ret = FieldValue::String(Box::from(&ctx.string_buf[..n]));
+        ctx.string_buf.clear();
+        Ok(ret)
     }
 }
 

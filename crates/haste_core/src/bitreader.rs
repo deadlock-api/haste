@@ -283,6 +283,19 @@ impl<'a> BitReader<'a> {
         Ok(num_chars)
     }
 
+    pub fn read_string_to_end(&mut self, buf: &mut Vec<u8>, line: bool) -> Result<usize, BitError> {
+        let mut num_chars = 0;
+        loop {
+            let val = self.read_byte()?;
+            if val == 0 || (line && val == b'\n') {
+                break;
+            }
+            buf.push(val);
+            num_chars += 1;
+        }
+        Ok(num_chars)
+    }
+
     pub fn read_ubitvarfp(&mut self) -> Result<u32, BitError> {
         #[allow(clippy::same_functions_in_if_condition)]
         let ret = if self.read_bool()? {
