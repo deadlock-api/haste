@@ -124,6 +124,17 @@ impl TryInto<String> for FieldValue {
     }
 }
 
+impl TryInto<Box<[u8]>> for FieldValue {
+    type Error = FieldValueConversionError;
+
+    fn try_into(self) -> Result<Box<[u8]>, Self::Error> {
+        match self {
+            FieldValue::String(value) => Ok(value),
+            _ => Err(FieldValueConversionError::IncompatibleTypeOrOutOfRangeInteger),
+        }
+    }
+}
+
 // debug and display...
 
 macro_rules! impl_debug {
