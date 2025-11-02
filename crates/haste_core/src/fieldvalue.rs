@@ -22,16 +22,16 @@ pub enum FieldValue {
     /// `CUtlString` which, as the name suggests, contains serialized data which canno't be
     /// successfully converted to str/String.
     ///
-    /// in c/cpp there's no enforcement on validition of strings. but in rust there is, see
-    /// https://doc.rust-lang.org/stable/std/string/struct.String.html#utf-8.
+    /// in c/cpp there's no enforcement on validation of strings. but in rust there is, see
+    /// `<https://doc.rust-lang.org/stable/std/string/struct.String.html#utf-8>`.
     ///
-    /// it doesn't not seem like thre's a reliable way to know which strings are treated as actual
+    /// it doesn't seem like there's a reliable way to know which strings are treated as actual
     /// strings and which ones are represent non-utf8 byte sequences to encode other data.
     ///
     /// also note that there's no data type in demo files that is dedicated specifically for
     /// transfering bytes.
     ///
-    /// use String::from_utf8_lossy in your code to convert this to an actual string, and handle
+    /// use `String::from_utf8_lossy` in your code to convert this to an actual string, and handle
     /// conversion errors.
     String(Box<[u8]>),
 }
