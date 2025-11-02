@@ -136,13 +136,19 @@ pub use deadlock::coord_from_cell as deadlock_coord_from_cell;
 /// meaning that there's no const of generating key for given path at runtime.
 #[must_use]
 pub const fn fkey_from_path(path: &[&str]) -> u64 {
+    // NOTE(blukai): this must match what send_node hashing in flattenedserializers.rs. in
+    // FlattenedSerializerField::new; and field_key in entities.rs in Entity::parse.
+    //
+    //   this function needs to be const.
+    //   it cannot be generalized into something that would handle all cases where field key needs
+    //   to be constructed.
     let seed = fxhash::hash_bytes(path[0].as_bytes());
     let mut hash = seed;
 
     let mut i = 1;
     while i < path.len() {
-        let part = fxhash::hash_bytes(path[i].as_bytes());
-        hash = fxhash::add_u64_to_hash(hash, part);
+        let part_hash = fxhash::hash_bytes(path[i].as_bytes());
+        hash = fxhash::add_u64_to_hash(hash, part_hash);
         i += 1;
     }
 
@@ -229,8 +235,8 @@ impl Entity {
                 .serializer
                 .get_child(fp.get(0).ok_or(EntityParseError::FieldNotFound)?)
                 .ok_or(EntityParseError::FieldNotFound)?;
-            // NOTE: field.var_name.hash is a "seed" for field_key_hash.
-            let mut field_key = field.var_name.hash;
+            // NOTE: field_key construction logic needs to match what `fkey_from_path` does.
+            let mut field_key = field.key;
             for i in 1..=fp.last() {
                 if field.is_dynamic_array() {
                     field = field.get_child(0).ok_or(EntityParseError::FieldNotFound)?;
