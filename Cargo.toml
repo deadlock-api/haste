@@ -14,16 +14,16 @@ haste_core = { path = "crates/haste_core" }
 haste_vartype = { path = "crates/haste_vartype" }
 # external
 anyhow = "1.0.100"
-bytes = "1.10.1"
+bytes = "1.11.0"
 dungers = { git = "https://github.com/deadlock-api/dungers.git", rev = "5e1e2aac76a027987911de3ef3d23ecfd992a7fb" }
 dyn-clone = "1.0.20"
 expect-test = "1.5.1"
-hashbrown = { version = "0.16.0", default-features = false }
-http = "1.3.1"
-log = "0.4.28"
+hashbrown = { version = "0.16.1", default-features = false }
+http = "1.4.0"
+log = "0.4.29"
 nohash = "0.2.0"
 prost = "0.14.1"
-reqwest = { version = "0.12.24", default-features = false }
+reqwest = { version = "0.12.26", default-features = false }
 serde = "1.0.228"
 serde_json = "1.0.145"
 snap = "1.1.1"
