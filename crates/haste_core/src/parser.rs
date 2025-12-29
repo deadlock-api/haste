@@ -554,7 +554,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                     }
                 }
                 DeltaHeader::LEAVE => {
-                    let entity = self.ctx.entities.handle_delete(entity_index);
+                    let entity = self.ctx.entities.handle_leave(entity_index);
                     if let Some(entity) = entity {
                         self.visitor
                             .on_entity(&self.ctx, delta_header, &entity)

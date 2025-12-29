@@ -441,6 +441,12 @@ impl EntityContainer {
         self.entities.remove(&index)
     }
 
+    // SAFETY: Same as above... But we also have the risk of entities that leave and come back not
+    // re-firing the CREATE event.  May need to handle this differently...
+    pub(crate) fn handle_leave(&mut self, index: i32) -> Option<Entity> {
+        self.entities.remove(&index)
+    }
+
     // SAFETY: if entity was ever created, and not deleted, it can be updated!
     // but there's a risk (that only should exist if replay is corrupted).
 
