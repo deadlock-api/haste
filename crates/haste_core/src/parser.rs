@@ -553,6 +553,14 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                             .await?;
                     }
                 }
+                DeltaHeader::LEAVE => {
+                    let entity = self.ctx.entities.handle_delete(entity_index);
+                    if let Some(entity) = entity {
+                        self.visitor
+                            .on_entity(&self.ctx, delta_header, &entity)
+                            .await?;
+                    }
+                }
                 DeltaHeader::UPDATE => {
                     self.ctx.entities.handle_update(
                         entity_index,
