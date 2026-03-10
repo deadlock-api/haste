@@ -13,8 +13,8 @@ haste_broadcast = { path = "crates/haste_broadcast", default-features = false }
 haste_core = { path = "crates/haste_core" }
 haste_vartype = { path = "crates/haste_vartype" }
 # external
-anyhow = "1.0.100"
-bytes = "1.11.0"
+anyhow = "1.0.102"
+bytes = "1.11.1"
 dungers = { git = "https://github.com/deadlock-api/dungers.git", rev = "5e1e2aac76a027987911de3ef3d23ecfd992a7fb" }
 dyn-clone = "1.0.20"
 expect-test = "1.5.1"
@@ -23,13 +23,13 @@ http = "1.4.0"
 log = "0.4.29"
 nohash = "0.2.0"
 prost = "0.14.3"
-reqwest = { version = "0.13.1", default-features = false }
+reqwest = { version = "0.13.2", default-features = false }
 serde = "1.0.228"
 serde_json = "1.0.149"
 snap = "1.1.1"
 thiserror = "2.0.18"
-valveprotos = { git = "https://github.com/deadlock-api/valveprotos-rs.git", rev = "bec6cd7d8b6bd2a10fc80d6df38637a37fd920e1", features = ["gc-client", "serde", "user-msgs"] }
-tokio = { version = "1.49.0", default-features = false }
+valveprotos = { git = "https://github.com/deadlock-api/valveprotos-rs.git", rev = "8dffcdb105e3765276d90a5229de21446bc11bd1", features = ["gc-client", "serde", "user-msgs"] }
+tokio = { version = "1.50.0", default-features = false }
 sync-unsafe-cell = "0.1.1"
 
 [package]
