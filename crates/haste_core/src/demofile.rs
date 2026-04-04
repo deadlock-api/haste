@@ -7,7 +7,9 @@ use valveprotos::common::{
     CDemoClassInfo, CDemoFileInfo, CDemoFullPacket, CDemoPacket, CDemoSendTables, EDemoCommands,
 };
 
-use crate::demostream::{CmdHeader, DecodeCmdError, DemoStream, ReadCmdError, ReadCmdHeaderError};
+use crate::demostream::{
+    CmdHeader, DecodeCmdError, DemoStream, ReadCmdError, ReadCmdHeaderError, SeekableDemoStream,
+};
 
 // #define DEMO_RECORD_BUFFER_SIZE 2*1024*1024
 //
@@ -91,13 +93,14 @@ impl<R: Read + Seek> DemoFile<R> {
 
     pub fn file_info(&mut self) -> Result<&CDemoFileInfo, anyhow::Error> {
         if self.file_info.is_none() {
-            let backup = self.stream_position()?;
+            let backup = self.rdr.stream_position()?;
 
-            self.seek(SeekFrom::Start(self.demo_header.fileinfo_offset as u64))?;
+            self.rdr
+                .seek(SeekFrom::Start(self.demo_header.fileinfo_offset as u64))?;
             let cmd_header = self.read_cmd_header()?;
             self.file_info = Some(CDemoFileInfo::decode(self.read_cmd(&cmd_header)?)?);
 
-            self.seek(SeekFrom::Start(backup))?;
+            self.rdr.seek(SeekFrom::Start(backup))?;
         }
 
         self.file_info.as_ref().context("file info not set")
@@ -108,19 +111,13 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
     // stream ops
     // ----
 
-    /// delegated from [`std::io::Seek`].
-    fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
-        self.rdr.seek(pos)
-    }
-
-    /// delegated from [`std::io::Seek`].
-    ///
-    /// # note
-    ///
-    /// be aware that this method can be quite expensive. it might be best to make sure not to call
-    /// it too frequently.
-    fn stream_position(&mut self) -> Result<u64, io::Error> {
-        self.rdr.stream_position()
+    fn is_at_eof(&mut self) -> Result<bool, io::Error> {
+        let pos = self.rdr.stream_position()?;
+        let len = self.rdr.seek(SeekFrom::End(0))?;
+        if pos != len {
+            self.rdr.seek(SeekFrom::Start(pos))?;
+        }
+        Ok(pos == len)
     }
 
     // cmd header
@@ -206,8 +203,28 @@ impl<R: Read + Seek> DemoStream for DemoFile<R> {
         CDemoFullPacket::decode(data).map_err(DecodeCmdError::DecodeProtobufError)
     }
 
-    // other
-    // ----
+    fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
+        self.rdr
+            .seek(SeekFrom::Current(i64::from(cmd_header.body_size)))
+            .map(|_| ())
+    }
+}
+
+impl<R: Read + Seek> SeekableDemoStream for DemoFile<R> {
+    /// delegated from [`std::io::Seek`].
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
+        self.rdr.seek(pos)
+    }
+
+    /// delegated from [`std::io::Seek`].
+    ///
+    /// # note
+    ///
+    /// be aware that this method can be quite expensive. it might be best to make sure not to call
+    /// it too frequently.
+    fn stream_position(&mut self) -> Result<u64, io::Error> {
+        self.rdr.stream_position()
+    }
 
     fn start_position(&self) -> u64 {
         size_of::<DemoHeader>() as u64

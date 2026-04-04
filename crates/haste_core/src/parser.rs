@@ -9,7 +9,7 @@ use valveprotos::common::{
 
 use crate::bitreader::BitReader;
 use crate::demofile::{DEMO_RECORD_BUFFER_SIZE, DemoHeaderError};
-use crate::demostream::{CmdHeader, DemoStream};
+use crate::demostream::{CmdHeader, DemoStream, SeekableDemoStream};
 use crate::entities::{DeltaHeader, Entity, EntityContainer};
 use crate::entityclasses::EntityClasses;
 use crate::fielddecoder::FieldDecodeContext;
@@ -136,16 +136,13 @@ pub trait Visitor {
 /// `ControlFlow` indicates the desired behavior of the run loop.
 enum ControlFlow {
     /// indicates that the command should be handled by the parser.
-    HandleCmd,
+    Handle,
     /// indicates that the command should be skipped; the stream position will be advanced by the
-    /// size of the command using `SeekFrom::Current(cmd_header.size)`.
-    SkipCmd,
+    /// size of the command.
+    Skip,
     /// indicates that the command should not be handled nor skipped, suggesting that it has been
     /// handled in a different manner outside the regular flow.
-    IgnoreCmd,
-    /// stops further processing and indicates that any work performed during the current cycle
-    /// must be undone.
-    Break,
+    Ignore,
 }
 
 // TODO: maybe rename to DemoPlayer (or DemoRunner?)
@@ -188,6 +185,20 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
     // recorded).
     //
     // must be publicly exposed for this to be actually useful.
+    async fn dispatch(&mut self, cf: ControlFlow, cmd_header: &CmdHeader) -> anyhow::Result<()> {
+        match cf {
+            ControlFlow::Handle => {
+                self.handle_cmd(cmd_header).await?;
+                if self.ctx.prev_tick != self.ctx.tick {
+                    self.visitor.on_tick_end(&self.ctx).await?;
+                }
+            }
+            ControlFlow::Skip => self.demo_stream.skip_cmd(cmd_header)?,
+            ControlFlow::Ignore => {}
+        }
+        Ok(())
+    }
+
     async fn run<F>(&mut self, mut handler: F) -> anyhow::Result<()>
     where
         F: AsyncFnMut(&mut Self, &CmdHeader) -> anyhow::Result<ControlFlow>,
@@ -197,21 +208,8 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
                 Ok(cmd_header) => {
                     self.ctx.prev_tick = self.ctx.tick;
                     self.ctx.tick = cmd_header.tick;
-                    match handler(self, &cmd_header).await? {
-                        ControlFlow::HandleCmd => {
-                            self.handle_cmd(&cmd_header).await?;
-                            if self.ctx.prev_tick != self.ctx.tick {
-                                self.visitor.on_tick_end(&self.ctx).await?;
-                            }
-                        }
-                        ControlFlow::SkipCmd => self.demo_stream.skip_cmd(&cmd_header)?,
-                        ControlFlow::IgnoreCmd => {}
-                        ControlFlow::Break => {
-                            self.demo_stream.unread_cmd_header(&cmd_header)?;
-                            self.ctx.tick = self.ctx.prev_tick;
-                            return Ok(());
-                        }
-                    }
+                    let cf = handler(self, &cmd_header).await?;
+                    self.dispatch(cf, &cmd_header).await?;
                 }
                 Err(err) => {
                     if self.demo_stream.is_at_eof().unwrap_or_default() {
@@ -224,93 +222,8 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
     }
 
     pub async fn run_to_end(&mut self) -> anyhow::Result<()> {
-        self.run(async |_notnotself, _cmd_header| Ok(ControlFlow::HandleCmd))
+        self.run(async |_notnotself, _cmd_header| Ok(ControlFlow::Handle))
             .await
-    }
-
-    fn reset(&mut self) -> Result<(), io::Error> {
-        self.demo_stream
-            .seek(SeekFrom::Start(self.demo_stream.start_position()))?;
-
-        self.ctx.entities.clear();
-        self.ctx.string_tables.clear();
-        self.ctx.instance_baseline.clear();
-        self.ctx.tick = -1;
-        self.ctx.prev_tick = -1;
-
-        Ok(())
-    }
-
-    pub async fn run_to_tick(&mut self, target_tick: i32) -> anyhow::Result<()> {
-        // TODO: do not allow tick to be less then -1
-
-        // TODO: do not allow tick to be greater then total ticks
-
-        // TODO: do not clear if seeking forward and there's no full packet on
-        // the way to the wanted tick / if target tick is closer then full
-        // packet interval
-        self.reset()?;
-
-        // NOTE: EDemoCommands::DemSyncTick is the last command with 4294967295
-        // tick (normlized to -1). last "initialization" command.
-        let mut did_handle_first_sync_tick = false;
-
-        // NOTE: EDemoCommands::DemFullPacket contains snapshot of everything...
-        // everything? it does not seem like it: string tables must be handled.
-        let mut did_handle_last_full_packet = false;
-
-        self.run(
-            async |notnotself: &mut Parser<D, V>, cmd_header: &CmdHeader| {
-                if cmd_header.tick > target_tick {
-                    return Ok(ControlFlow::Break);
-                }
-
-                // init string tables, flattened serializers and entity classes
-                if !did_handle_first_sync_tick {
-                    did_handle_first_sync_tick = cmd_header.cmd == EDemoCommands::DemSyncTick;
-                    return Ok(ControlFlow::HandleCmd);
-                }
-
-                let is_full_packet = cmd_header.cmd == EDemoCommands::DemFullPacket;
-                let distance_to_target_tick = target_tick - notnotself.ctx.tick;
-                // TODO: what if there's no full packet ahead? maybe dem file is
-                // corrupted or something... scan for full packets before enterint
-                // the "run"?
-                let has_full_packet_ahead =
-                    distance_to_target_tick > notnotself.ctx.full_packet_interval + 100;
-                if is_full_packet {
-                    let cmd_body = notnotself.demo_stream.read_cmd(cmd_header)?;
-                    notnotself
-                        .visitor
-                        .on_cmd(&notnotself.ctx, cmd_header, cmd_body)
-                        .await?;
-
-                    let mut cmd = D::decode_cmd_full_packet(cmd_body)?;
-                    if has_full_packet_ahead {
-                        // NOTE: clarity seem to ignore "intermediary" full packet's
-                        // packet
-                        //
-                        // TODO: verify that is okay to ignore "intermediary" full
-                        // packet's packet
-                        cmd.packet = None;
-                    }
-                    notnotself.handle_cmd_full_packet(cmd).await?;
-                    // NOTE: there's absolutely no reason to check if tick changed because it changed.
-                    notnotself.visitor.on_tick_end(&notnotself.ctx).await?;
-
-                    did_handle_last_full_packet = !has_full_packet_ahead;
-
-                    return Ok(ControlFlow::IgnoreCmd);
-                }
-
-                if did_handle_last_full_packet {
-                    Ok(ControlFlow::HandleCmd)
-                } else {
-                    Ok(ControlFlow::SkipCmd)
-                }
-            },
-        )
-        .await
     }
 
     // important initialization messages:
@@ -618,5 +531,121 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
 
     pub fn context(&self) -> &Context {
         &self.ctx
+    }
+}
+
+impl<D: SeekableDemoStream, V: Visitor> Parser<D, V> {
+    /// like [`run`](Parser::run) but the handler can return `None` to break out of the loop,
+    /// unreading the current cmd header and restoring the previous tick.
+    async fn run_seekable<F>(&mut self, mut handler: F) -> anyhow::Result<()>
+    where
+        F: AsyncFnMut(&mut Self, &CmdHeader) -> anyhow::Result<Option<ControlFlow>>,
+    {
+        loop {
+            match self.demo_stream.read_cmd_header() {
+                Ok(cmd_header) => {
+                    self.ctx.prev_tick = self.ctx.tick;
+                    self.ctx.tick = cmd_header.tick;
+                    if let Some(cf) = handler(self, &cmd_header).await? {
+                        self.dispatch(cf, &cmd_header).await?;
+                    } else {
+                        self.demo_stream.unread_cmd_header(&cmd_header)?;
+                        self.ctx.tick = self.ctx.prev_tick;
+                        return Ok(());
+                    }
+                }
+                Err(err) => {
+                    if self.demo_stream.is_at_eof().unwrap_or_default() {
+                        return Ok(());
+                    }
+                    return Err(err.into());
+                }
+            }
+        }
+    }
+
+    fn reset(&mut self) -> Result<(), io::Error> {
+        self.demo_stream
+            .seek(SeekFrom::Start(self.demo_stream.start_position()))?;
+
+        self.ctx.entities.clear();
+        self.ctx.string_tables.clear();
+        self.ctx.instance_baseline.clear();
+        self.ctx.tick = -1;
+        self.ctx.prev_tick = -1;
+
+        Ok(())
+    }
+
+    pub async fn run_to_tick(&mut self, target_tick: i32) -> anyhow::Result<()> {
+        // TODO: do not allow tick to be less then -1
+
+        // TODO: do not allow tick to be greater then total ticks
+
+        // TODO: do not clear if seeking forward and there's no full packet on
+        // the way to the wanted tick / if target tick is closer then full
+        // packet interval
+        self.reset()?;
+
+        // NOTE: EDemoCommands::DemSyncTick is the last command with 4294967295
+        // tick (normlized to -1). last "initialization" command.
+        let mut did_handle_first_sync_tick = false;
+
+        // NOTE: EDemoCommands::DemFullPacket contains snapshot of everything...
+        // everything? it does not seem like it: string tables must be handled.
+        let mut did_handle_last_full_packet = false;
+
+        self.run_seekable(
+            async |notnotself: &mut Parser<D, V>, cmd_header: &CmdHeader| {
+                if cmd_header.tick > target_tick {
+                    return Ok(None);
+                }
+
+                // init string tables, flattened serializers and entity classes
+                if !did_handle_first_sync_tick {
+                    did_handle_first_sync_tick = cmd_header.cmd == EDemoCommands::DemSyncTick;
+                    return Ok(Some(ControlFlow::Handle));
+                }
+
+                let is_full_packet = cmd_header.cmd == EDemoCommands::DemFullPacket;
+                let distance_to_target_tick = target_tick - notnotself.ctx.tick;
+                // TODO: what if there's no full packet ahead? maybe dem file is
+                // corrupted or something... scan for full packets before enterint
+                // the "run"?
+                let has_full_packet_ahead =
+                    distance_to_target_tick > notnotself.ctx.full_packet_interval + 100;
+                if is_full_packet {
+                    let cmd_body = notnotself.demo_stream.read_cmd(cmd_header)?;
+                    notnotself
+                        .visitor
+                        .on_cmd(&notnotself.ctx, cmd_header, cmd_body)
+                        .await?;
+
+                    let mut cmd = D::decode_cmd_full_packet(cmd_body)?;
+                    if has_full_packet_ahead {
+                        // NOTE: clarity seem to ignore "intermediary" full packet's
+                        // packet
+                        //
+                        // TODO: verify that is okay to ignore "intermediary" full
+                        // packet's packet
+                        cmd.packet = None;
+                    }
+                    notnotself.handle_cmd_full_packet(cmd).await?;
+                    // NOTE: there's absolutely no reason to check if tick changed because it changed.
+                    notnotself.visitor.on_tick_end(&notnotself.ctx).await?;
+
+                    did_handle_last_full_packet = !has_full_packet_ahead;
+
+                    return Ok(Some(ControlFlow::Ignore));
+                }
+
+                if did_handle_last_full_packet {
+                    Ok(Some(ControlFlow::Handle))
+                } else {
+                    Ok(Some(ControlFlow::Skip))
+                }
+            },
+        )
+        .await
     }
 }

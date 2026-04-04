@@ -7,7 +7,7 @@ use std::time::Instant;
 use bytes::buf::Reader;
 use bytes::{Buf, Bytes};
 use haste_core::demostream::{
-    CmdHeader, DecodeCmdError, DemoStream, ReadCmdError, ReadCmdHeaderError,
+    CmdHeader, DecodeCmdError, DemoStream, ReadCmdError, ReadCmdHeaderError, SeekableDemoStream,
 };
 use serde::Deserialize;
 use valveprotos::common::{CDemoClassInfo, CDemoFullPacket, CDemoPacket, CDemoSendTables};
@@ -433,31 +433,6 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
     // stream ops
     // ----
 
-    /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`. othwerwise
-    /// delegated to [`std::io::Cursor`].
-    fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
-        match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
-            StreamBuffer::Seekable(ref mut c) => c.seek(pos),
-        }
-    }
-
-    /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
-    fn stream_position(&mut self) -> Result<u64, io::Error> {
-        match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
-            StreamBuffer::Seekable(ref mut c) => Ok(c.position()),
-        }
-    }
-
-    /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
-    fn stream_len(&mut self) -> Result<u64, io::Error> {
-        match self.stream_buffer {
-            StreamBuffer::Last(_) => not_seekable_panic!(),
-            StreamBuffer::Seekable(ref c) => Ok(c.get_ref().len() as u64),
-        }
-    }
-
     /// panics if `next_packet` never succeded.
     fn is_at_eof(&mut self) -> Result<bool, io::Error> {
         match self.stream_buffer {
@@ -547,8 +522,51 @@ impl<'client, C: HttpClient + 'client> DemoStream for BroadcastHttp<'client, C> 
         decode_cmd_full_packet(data)
     }
 
-    // other
-    // ----
+    fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
+        match self.stream_buffer {
+            StreamBuffer::Last(None) => no_packet_panic!(),
+            StreamBuffer::Last(Some(ref mut r)) => {
+                use bytes::Buf;
+                let size = cmd_header.body_size as usize;
+                let bytes = r.get_mut();
+                if bytes.remaining() < size {
+                    return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+                }
+                bytes.advance(size);
+                Ok(())
+            }
+            StreamBuffer::Seekable(ref mut c) => c
+                .seek(SeekFrom::Current(i64::from(cmd_header.body_size)))
+                .map(|_| ()),
+        }
+    }
+}
+
+impl<'client, C: HttpClient + 'client> SeekableDemoStream for BroadcastHttp<'client, C> {
+    /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`. othwerwise
+    /// delegated to [`std::io::Cursor`].
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error> {
+        match self.stream_buffer {
+            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Seekable(ref mut c) => c.seek(pos),
+        }
+    }
+
+    /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
+    fn stream_position(&mut self) -> Result<u64, io::Error> {
+        match self.stream_buffer {
+            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Seekable(ref mut c) => Ok(c.position()),
+        }
+    }
+
+    /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
+    fn stream_len(&mut self) -> Result<u64, io::Error> {
+        match self.stream_buffer {
+            StreamBuffer::Last(_) => not_seekable_panic!(),
+            StreamBuffer::Seekable(ref c) => Ok(c.get_ref().len() as u64),
+        }
+    }
 
     /// panics if [`BroadcastHttp`] was not constructed with `start_reading_and_buffer`.
     fn start_position(&self) -> u64 {

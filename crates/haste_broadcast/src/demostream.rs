@@ -1,6 +1,6 @@
 use std::io::{Read, SeekFrom};
 
-use haste_core::demostream::{CmdHeader, DecodeCmdError, DemoStream, ReadCmdHeaderError};
+use haste_core::demostream::{CmdHeader, DecodeCmdError, ReadCmdHeaderError, SeekableDemoStream};
 use prost::Message;
 use valveprotos::common::{
     CDemoClassInfo, CDemoFullPacket, CDemoPacket, CDemoSendTables, EDemoCommands,
@@ -88,7 +88,9 @@ pub(crate) fn decode_cmd_full_packet(_data: &[u8]) -> Result<CDemoFullPacket, De
 // other
 // ----
 
-pub(crate) fn scan_for_last_tick(demo_stream: &mut impl DemoStream) -> Result<i32, anyhow::Error> {
+pub(crate) fn scan_for_last_tick(
+    demo_stream: &mut impl SeekableDemoStream,
+) -> Result<i32, anyhow::Error> {
     let mut last_tick: i32 = -1;
     let backup = demo_stream.stream_position()?;
     loop {

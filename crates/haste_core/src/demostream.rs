@@ -42,15 +42,34 @@ pub enum DecodeCmdError {
     DecodeProtobufError(#[from] prost::DecodeError),
 }
 
-// TODO: is there a way to restrict (idk if this is a correct word) DemoStream trait so that it'll
-// require seek ops to be implemented only if the underlying thing binds to io::Seek trait? thus
-// making so that Parser will not provide methods (such as run_to_tick) that need seeking
-// capabilities?
-
+/// forward-only demo stream that does not require seeking.
 pub trait DemoStream {
     // stream ops
     // ----
 
+    fn is_at_eof(&mut self) -> Result<bool, io::Error>;
+
+    // cmd header
+    // ----
+
+    fn read_cmd_header(&mut self) -> Result<CmdHeader, ReadCmdHeaderError>;
+
+    // cmd
+    // ----
+
+    fn read_cmd(&mut self, cmd_header: &CmdHeader) -> Result<&[u8], ReadCmdError>;
+
+    fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError>;
+    fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError>;
+    fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError>;
+    fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError>;
+
+    fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error>;
+}
+
+/// extension of [`DemoStream`] that supports seeking. required for operations like
+/// [`Parser::run_to_tick`](crate::parser::Parser::run_to_tick).
+pub trait SeekableDemoStream: DemoStream {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, io::Error>;
 
     fn stream_position(&mut self) -> Result<u64, io::Error>;
@@ -69,56 +88,10 @@ pub trait DemoStream {
         Ok(len)
     }
 
-    fn is_at_eof(&mut self) -> Result<bool, io::Error> {
-        Ok(self.stream_position()? == self.stream_len()?)
-    }
-
-    // cmd header
-    // ----
-
-    fn read_cmd_header(&mut self) -> Result<CmdHeader, ReadCmdHeaderError>;
-
     fn unread_cmd_header(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
         self.seek(SeekFrom::Current(-i64::from(cmd_header.size)))
             .map(|_| ())
     }
-
-    // cmd
-    // ----
-
-    fn read_cmd(&mut self, cmd_header: &CmdHeader) -> Result<&[u8], ReadCmdError>;
-
-    // TODO: should DemoStream require decoders for all cmds to be implemented?
-    //
-    // Error (no msg)
-    // Stop (empty msg)
-    // fn decode_cmd_file_header(data: &[u8]) -> Result<CDemoFileHeader, DecodeCmdError>;
-    // fn decode_cmd_file_info(data: &[u8]) -> Result<CDemoFileInfo, DecodeCmdError>;
-    // SyncTick (empty msg)
-    fn decode_cmd_send_tables(data: &[u8]) -> Result<CDemoSendTables, DecodeCmdError>;
-    fn decode_cmd_class_info(data: &[u8]) -> Result<CDemoClassInfo, DecodeCmdError>;
-    // fn decode_cmd_string_tables(data: &[u8]) -> Result<CDemoStringTables, DecodeCmdError>;
-    fn decode_cmd_packet(data: &[u8]) -> Result<CDemoPacket, DecodeCmdError>;
-    // SignonPacket (same as Packet)
-    // fn decode_cmd_console_cmd(data: &[u8]) -> Result<CDemoConsoleCmd, DecodeCmdError>;
-    // fn decode_cmd_custom_data(data: &[u8]) -> Result<CDemoCustomData, DecodeCmdError>;
-    // fn decode_cmd_custom_data_callbacks(data: &[u8]) -> Result<CDemoCustomDataCallbacks, DecodeCmdError>;
-    // fn decode_cmd_user_cmd(data: &[u8]) -> Result<CDemoUserCmd, DecodeCmdError>;
-    fn decode_cmd_full_packet(data: &[u8]) -> Result<CDemoFullPacket, DecodeCmdError>;
-    // fn decode_cmd_save_game(data: &[u8]) -> Result<CDemoSaveGame, DecodeCmdError>;
-    // fn decode_cmd_spawn_groups(data: &[u8]) -> Result<CDemoSpawnGroups, DecodeCmdError>;
-    // fn decode_cmd_animation_data(data: &[u8]) -> Result<CDemoAnimationData, DecodeCmdError>;
-    // fn decode_cmd_animation_header(data: &[u8]) -> Result<CDemoAnimationHeader, DecodeCmdError>;
-    // Max
-    // IsCompressed (flag)
-
-    fn skip_cmd(&mut self, cmd_header: &CmdHeader) -> Result<(), io::Error> {
-        self.seek(SeekFrom::Current(i64::from(cmd_header.body_size)))
-            .map(|_| ())
-    }
-
-    // other
-    // ----
 
     fn start_position(&self) -> u64;
 
