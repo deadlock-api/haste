@@ -28,7 +28,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 snap = "1.1.1"
 thiserror = "2.0.18"
-valveprotos = { git = "https://github.com/deadlock-api/valveprotos-rs.git", rev = "d4ce19ea77083bdc4db690bbd906659f80f34be4", features = ["gc-client", "serde", "user-msgs"] }
+valveprotos = { git = "https://github.com/deadlock-api/valveprotos-rs.git", rev = "5fd2477e8f0868fb2d75c8a99bed6e336da4f3dd", features = ["gc-client", "serde", "user-msgs"] }
 tokio = { version = "1.50.0", default-features = false }
 sync-unsafe-cell = "0.1.1"
 
