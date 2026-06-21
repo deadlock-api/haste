@@ -17,6 +17,12 @@
 #![allow(clippy::match_wildcard_for_single_variants)]
 
 // TODO: figure pub scopes for all the things
+#[cfg(feature = "async")]
+pub mod async_broadcast_stream;
+#[cfg(feature = "async")]
+pub mod async_demofile;
+#[cfg(feature = "async")]
+pub mod async_demostream;
 pub mod bitreader;
 pub mod demofile;
 pub mod demostream;
@@ -29,6 +35,12 @@ pub mod fieldvalue;
 pub mod flattenedserializers;
 pub mod fxhash;
 pub(crate) mod instancebaseline;
+#[cfg(feature = "async")]
+pub mod packet_channel_broadcast_stream;
+#[cfg(feature = "async")]
+pub mod packet_channel_demo_stream;
+#[cfg(feature = "async")]
+pub mod packet_source;
 pub mod parser;
 pub(crate) mod quantizedfloat;
 pub mod stringtables;

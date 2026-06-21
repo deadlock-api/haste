@@ -288,6 +288,11 @@ impl Entity {
         self.fields.iter().map(|(key, ef)| (key, &ef.value))
     }
 
+    #[must_use]
+    pub fn get_field_value(&self, key: &u64) -> Option<&FieldValue> {
+        self.fields.get(key).map(|ef| &ef.value)
+    }
+
     /// get the value of the field with the provided key, and attempt to convert it.
     ///
     /// this is a variant of "getter" returns None on conversion error, intended to be used for
@@ -347,11 +352,43 @@ impl Entity {
     }
 }
 
+fn skip_entity_fields(
+    serializer: &FlattenedSerializer,
+    _field_decode_ctx: &mut FieldDecodeContext,
+    br: &mut BitReader,
+    fps: &mut [FieldPath],
+) -> Result<(), EntityParseError> {
+    let fp_count = fieldpath::read_field_paths(br, fps)?;
+    for i in 0..fp_count {
+        let fp = fps.get(i).ok_or(EntityParseError::FieldNotFound)?;
+
+        let mut field = serializer
+            .get_child(fp.get(0).ok_or(EntityParseError::FieldNotFound)?)
+            .ok_or(EntityParseError::FieldNotFound)?;
+
+        for i in 1..=fp.last() {
+            if field.is_dynamic_array() {
+                field = field.get_child(0).ok_or(EntityParseError::FieldNotFound)?;
+            } else {
+                field = field
+                    .get_child(fp.get(i).ok_or(EntityParseError::FieldNotFound)?)
+                    .ok_or(EntityParseError::FieldNotFound)?;
+            }
+        }
+
+        field.metadata.decoder.skip_bits(br)?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct EntityContainer {
     // NOTE: hashbrown hashmap with no hash performs better then Vec.
     entities: HashMap<i32, Entity, BuildHasherDefault<NoHashHasher<i32>>>,
     baseline_entities: HashMap<i32, Entity, BuildHasherDefault<NoHashHasher<i32>>>,
+    skipped_serializers:
+        HashMap<i32, Arc<FlattenedSerializer>, BuildHasherDefault<NoHashHasher<i32>>>,
 
     // NOTE: it might be tempting to introduce a "wrapper" struct, something like FieldPathReader
     // and turn read_field_path function into a method, but that's just suggar with no practical
@@ -374,6 +411,10 @@ impl EntityContainer {
                 1024,
                 BuildHasherDefault::default(),
             ),
+            skipped_serializers: HashMap::with_capacity_and_hasher(
+                MAX_EDICTS as usize,
+                BuildHasherDefault::default(),
+            ),
 
             // NOTE: 4096 is an arbitrary value that is large enough that that came out of printing
             // out count of fps collected per "run". (sort -nr can be handy)
@@ -381,6 +422,7 @@ impl EntityContainer {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn handle_create(
         &mut self,
         index: i32,
@@ -434,10 +476,86 @@ impl EntityContainer {
         Ok(index)
     }
 
+    #[cfg_attr(not(feature = "async"), allow(dead_code))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn handle_create_with_filter<F>(
+        &mut self,
+        index: i32,
+        field_decode_ctx: &mut FieldDecodeContext,
+        br: &mut BitReader,
+        entity_classes: &EntityClasses,
+        instance_baseline: &InstanceBaseline,
+        serializers: &FlattenedSerializerContainer,
+        should_track: F,
+    ) -> Result<Option<i32>, EntityParseError>
+    where
+        F: Fn(u64) -> bool,
+    {
+        let class_id = br.read_ubit64(entity_classes.bits)?.try_into()?;
+        let _serial = br.read_ubit64(NUM_SERIAL_NUM_BITS as usize);
+        let _unknown = br.read_uvarint32();
+
+        let class_info = entity_classes
+            .by_id(class_id)
+            .ok_or(BitError::MalformedVarint)?;
+        let serializer = serializers
+            .by_name_hash(class_info.network_name_hash)
+            .ok_or(BitError::MalformedVarint)?;
+
+        let serializer_hash = serializer.serializer_name.hash;
+
+        if !should_track(serializer_hash) {
+            skip_entity_fields(&serializer, field_decode_ctx, br, &mut self.field_paths)?;
+            self.skipped_serializers.insert(index, serializer);
+            return Ok(None);
+        }
+
+        let mut entity = match self.baseline_entities.entry(class_id) {
+            Entry::Occupied(oe) => {
+                let mut entity = oe.get().clone();
+                entity.index = index;
+                entity
+            }
+            Entry::Vacant(ve) => {
+                let mut entity = Entity {
+                    index,
+                    fields: HashMap::with_capacity_and_hasher(
+                        serializer.fields.len(),
+                        BuildHasherDefault::default(),
+                    ),
+                    serializer,
+                };
+
+                #[allow(unsafe_code)]
+                let baseline_data = unsafe { instance_baseline.by_id_unchecked(class_id) };
+
+                let mut baseline_br = BitReader::new(baseline_data);
+                entity.parse(field_decode_ctx, &mut baseline_br, &mut self.field_paths)?;
+                baseline_br.is_overflowed()?;
+
+                ve.insert(entity).clone()
+            }
+        };
+
+        entity.parse(field_decode_ctx, br, &mut self.field_paths)?;
+
+        self.entities.insert(index, entity);
+        Ok(Some(index))
+    }
+
     // SAFETY: if it's being deleted menas that it was created, riiight? but
     // there's a risk (that only should exist if replay is corrupted).
 
     pub(crate) fn handle_delete(&mut self, index: i32) -> Option<Entity> {
+        self.skipped_serializers.remove(&index);
+        self.entities.remove(&index)
+    }
+
+    // SAFETY: Same as above... But we also have the risk of entities that leave and come back not
+    // re-firing the CREATE event.  May need to handle this differently...
+    #[cfg_attr(not(feature = "async"), allow(dead_code))]
+    pub(crate) fn handle_leave(&mut self, index: i32) -> Option<Entity> {
+        self.skipped_serializers.remove(&index);
         self.entities.remove(&index)
     }
 
@@ -450,6 +568,12 @@ impl EntityContainer {
         field_decode_ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
     ) -> Result<Option<&Entity>, EntityParseError> {
+        // First check if this entity was skipped - if so, skip the update data
+        if let Some(serializer) = self.skipped_serializers.get(&index) {
+            skip_entity_fields(serializer, field_decode_ctx, br, &mut self.field_paths)?;
+            return Ok(None);
+        }
+
         let Some(entity) = self.entities.get_mut(&index) else {
             return Ok(None);
         };
@@ -483,6 +607,7 @@ impl EntityContainer {
     pub fn clear(&mut self) {
         self.entities.clear();
         self.baseline_entities.clear();
+        self.skipped_serializers.clear();
     }
 
     #[must_use]

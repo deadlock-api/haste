@@ -49,6 +49,20 @@ pub struct Context {
 }
 
 impl Context {
+    pub(crate) fn new() -> Self {
+        Self {
+            entities: EntityContainer::new(),
+            string_tables: StringTableContainer::default(),
+            instance_baseline: InstanceBaseline::default(),
+            serializers: None,
+            entity_classes: None,
+            tick_interval: 0.0,
+            full_packet_interval: 0,
+            tick: -1,
+            prev_tick: -1,
+        }
+    }
+
     // NOTE: following methods are public-facing api; do not use them internally
 
     #[must_use]
@@ -92,6 +106,17 @@ impl Context {
 
 pub trait Visitor {
     type Error: core::error::Error + Send + Sync + 'static;
+
+    /// Decides whether the entity backed by the serializer identified by
+    /// `serializer_name_hash` should be tracked. Returning `false` lets the parser
+    /// skip-decode the entity's fields without materializing it, which is cheaper
+    /// when a consumer only cares about a subset of entity types.
+    ///
+    /// The default tracks everything.
+    #[allow(unused_variables)]
+    fn should_track_entity(&self, serializer_name_hash: u64) -> bool {
+        true
+    }
 
     // TODO: include updated fields (list of field paths?)
     #[allow(unused_variables)]
@@ -161,17 +186,7 @@ impl<D: DemoStream, V: Visitor> Parser<D, V> {
             demo_stream,
             buf: vec![0; DEMO_RECORD_BUFFER_SIZE],
             visitor,
-            ctx: Context {
-                entities: EntityContainer::new(),
-                string_tables: StringTableContainer::default(),
-                instance_baseline: InstanceBaseline::default(),
-                serializers: None,
-                entity_classes: None,
-                tick_interval: 0.0,
-                full_packet_interval: 0,
-                tick: -1,
-                prev_tick: -1,
-            },
+            ctx: Context::new(),
             field_decode_ctx: FieldDecodeContext::default(),
         })
     }
@@ -647,5 +662,366 @@ impl<D: SeekableDemoStream, V: Visitor> Parser<D, V> {
             },
         )
         .await
+    }
+}
+
+#[cfg(feature = "async")]
+use crate::async_demostream::AsyncDemoStream;
+
+#[cfg(feature = "async")]
+pub struct AsyncStreamingParser<D: AsyncDemoStream, V: Visitor> {
+    demo_stream: D,
+    buf: Vec<u8>,
+    visitor: V,
+    ctx: Context,
+    field_decode_ctx: FieldDecodeContext,
+}
+
+#[cfg(feature = "async")]
+impl<D: AsyncDemoStream, V: Visitor> AsyncStreamingParser<D, V> {
+    pub fn from_stream_with_visitor(demo_stream: D, visitor: V) -> Result<Self, DemoHeaderError> {
+        Ok(Self {
+            demo_stream,
+            buf: vec![0; DEMO_RECORD_BUFFER_SIZE],
+            visitor,
+            ctx: Context::new(),
+            field_decode_ctx: FieldDecodeContext::default(),
+        })
+    }
+
+    pub fn into_visitor(self) -> V {
+        self.visitor
+    }
+
+    pub fn visitor_mut(&mut self) -> &mut V {
+        &mut self.visitor
+    }
+
+    pub async fn run_to_end(&mut self) -> anyhow::Result<()> {
+        self.run_internal(false).await
+    }
+
+    pub async fn run_to_end_final_state(&mut self) -> anyhow::Result<()> {
+        self.run_internal(true).await
+    }
+
+    async fn run_internal(&mut self, reset_on_full_packet: bool) -> anyhow::Result<()> {
+        loop {
+            match self.demo_stream.read_cmd_header().await {
+                Ok(cmd_header) => {
+                    self.ctx.prev_tick = self.ctx.tick;
+                    self.ctx.tick = cmd_header.tick;
+
+                    if reset_on_full_packet && cmd_header.cmd == EDemoCommands::DemFullPacket {
+                        self.ctx.entities.clear();
+                    }
+
+                    self.handle_cmd(&cmd_header).await?;
+                    if self.ctx.prev_tick != self.ctx.tick {
+                        self.visitor.on_tick_end(&self.ctx).await?;
+                        // tokio::task::yield_now().await; // TEMP
+                    }
+                }
+                Err(err) => {
+                    if matches!(
+                        err,
+                        crate::demostream::ReadCmdHeaderError::IoError(ref e)
+                            if e.kind() == io::ErrorKind::UnexpectedEof
+                    ) {
+                        return Ok(());
+                    }
+                    return Err(err.into());
+                }
+            }
+        }
+    }
+
+    async fn handle_cmd(&mut self, cmd_header: &CmdHeader) -> anyhow::Result<()> {
+        let cmd_body = self.demo_stream.read_cmd(cmd_header).await?;
+        self.visitor.on_cmd(&self.ctx, cmd_header, cmd_body).await?;
+
+        match cmd_header.cmd {
+            EDemoCommands::DemPacket | EDemoCommands::DemSignonPacket => {
+                let cmd = D::decode_cmd_packet(cmd_body)?;
+                self.handle_cmd_packet(cmd).await?;
+            }
+
+            EDemoCommands::DemSendTables => {
+                if self.ctx.serializers.is_some() {
+                    return Ok(());
+                }
+
+                let cmd = D::decode_cmd_send_tables(cmd_body)?;
+                self.ctx.serializers = Some(FlattenedSerializerContainer::parse(cmd)?);
+            }
+
+            EDemoCommands::DemClassInfo => {
+                if self.ctx.entity_classes.is_some() {
+                    return Ok(());
+                }
+
+                let cmd = D::decode_cmd_class_info(cmd_body)?;
+                self.ctx.entity_classes = Some(EntityClasses::parse(&cmd));
+
+                if let Some(string_table) = self
+                    .ctx
+                    .string_tables
+                    .find_table(INSTANCE_BASELINE_TABLE_NAME)
+                {
+                    let Some(entity_classes) = self.ctx.entity_classes.as_ref() else {
+                        bail!("entity not found")
+                    };
+                    self.ctx
+                        .instance_baseline
+                        .update(string_table, entity_classes.classes)?;
+                }
+            }
+
+            EDemoCommands::DemFullPacket => {
+                let cmd = D::decode_cmd_full_packet(cmd_body)?;
+                self.handle_cmd_full_packet(cmd).await?;
+            }
+
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    async fn handle_cmd_packet(&mut self, cmd: CDemoPacket) -> anyhow::Result<()> {
+        let data = cmd.data.unwrap_or_default();
+        let mut br = BitReader::new(&data);
+
+        while br.num_bits_left() > 8 {
+            let command = br.read_ubitvar()?;
+            let size = br.read_uvarint32()? as usize;
+
+            let buf = &mut self.buf[..size];
+            br.read_bytes(buf)?;
+            let buf: &_ = buf;
+
+            self.visitor.on_packet(&self.ctx, command, buf).await?;
+
+            match command {
+                c if c == SvcMessages::SvcCreateStringTable as u32 => {
+                    let msg = CsvcMsgCreateStringTable::decode(buf)?;
+                    self.handle_svc_create_string_table(&msg)?;
+                }
+
+                c if c == SvcMessages::SvcUpdateStringTable as u32 => {
+                    let msg = CsvcMsgUpdateStringTable::decode(buf)?;
+                    self.handle_svc_update_string_table(&msg)?;
+                }
+
+                c if c == SvcMessages::SvcPacketEntities as u32 => {
+                    let msg = CsvcMsgPacketEntities::decode(buf)?;
+                    self.handle_svc_packet_entities(msg).await?;
+                }
+
+                c if c == SvcMessages::SvcServerInfo as u32 => {
+                    let msg = CsvcMsgServerInfo::decode(buf)?;
+                    if let Some(tick_interval) = msg.tick_interval {
+                        self.ctx.tick_interval = tick_interval;
+
+                        let ratio = DEFAULT_TICK_INTERVAL / tick_interval;
+                        self.ctx.full_packet_interval = DEFAULT_FULL_PACKET_INTERVAL * ratio as i32;
+
+                        self.field_decode_ctx.tick_interval = tick_interval;
+                    }
+                }
+
+                _ => {}
+            }
+        }
+
+        br.is_overflowed()?;
+        Ok(())
+    }
+
+    fn handle_svc_create_string_table(
+        &mut self,
+        msg: &CsvcMsgCreateStringTable,
+    ) -> anyhow::Result<()> {
+        let string_table = self.ctx.string_tables.create_string_table_mut(
+            msg.name(),
+            msg.user_data_fixed_size(),
+            msg.user_data_size(),
+            msg.user_data_size_bits(),
+            msg.flags(),
+            msg.using_varint_bitcounts(),
+        );
+
+        let string_data = if msg.data_compressed() {
+            let sd = msg.string_data();
+            let decompress_len = snap::raw::decompress_len(sd)?;
+            snap::raw::Decoder::new().decompress(sd, &mut self.buf)?;
+            &self.buf[..decompress_len]
+        } else {
+            msg.string_data()
+        };
+
+        let mut br = BitReader::new(string_data);
+        string_table.parse_update(&mut br, msg.num_entries())?;
+        br.is_overflowed()?;
+
+        if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME)
+            && let Some(entity_classes) = self.ctx.entity_classes.as_ref()
+        {
+            self.ctx
+                .instance_baseline
+                .update(string_table, entity_classes.classes)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_svc_update_string_table(
+        &mut self,
+        msg: &CsvcMsgUpdateStringTable,
+    ) -> anyhow::Result<()> {
+        debug_assert!(msg.table_id.is_some(), "invalid table id");
+        let table_id = msg.table_id() as usize;
+
+        debug_assert!(
+            self.ctx.string_tables.has_table(table_id),
+            "trying to update non-existent table"
+        );
+        let Some(string_table) = self.ctx.string_tables.get_table_mut(table_id) else {
+            bail!("string table not found")
+        };
+
+        let mut br = BitReader::new(msg.string_data());
+        string_table.parse_update(&mut br, msg.num_changed_entries())?;
+        br.is_overflowed()?;
+
+        if string_table.name().eq(INSTANCE_BASELINE_TABLE_NAME)
+            && let Some(entity_classes) = self.ctx.entity_classes.as_ref()
+        {
+            self.ctx
+                .instance_baseline
+                .update(string_table, entity_classes.classes)?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_svc_packet_entities(
+        &mut self,
+        msg: CsvcMsgPacketEntities,
+    ) -> anyhow::Result<()> {
+        let Some(entity_classes) = self.ctx.entity_classes.as_ref() else {
+            bail!("entity classes are not available");
+        };
+        let Some(serializers) = self.ctx.serializers.as_ref() else {
+            bail!("serializers are not available");
+        };
+        let instance_baseline = &self.ctx.instance_baseline;
+
+        let entity_data = msg.entity_data();
+        let mut br = BitReader::new(entity_data);
+
+        let mut entity_index: i32 = -1;
+        for _ in (0..msg.updated_entries()).rev() {
+            entity_index += br.read_ubitvar()? as i32 + 1;
+
+            let delta_header = DeltaHeader::from_bit_reader(&mut br)?;
+            match delta_header {
+                DeltaHeader::CREATE => {
+                    let maybe_index = self.ctx.entities.handle_create_with_filter(
+                        entity_index,
+                        &mut self.field_decode_ctx,
+                        &mut br,
+                        entity_classes,
+                        instance_baseline,
+                        serializers,
+                        |hash| self.visitor.should_track_entity(hash),
+                    )?;
+                    if let Some(index) = maybe_index {
+                        let Some(entity) = self.ctx.entities.get(&index) else {
+                            bail!("entity not found")
+                        };
+                        self.visitor
+                            .on_entity(&self.ctx, delta_header, entity)
+                            .await?;
+                    }
+                }
+                DeltaHeader::DELETE => {
+                    let entity = self.ctx.entities.handle_delete(entity_index);
+                    if let Some(entity) = entity {
+                        self.visitor
+                            .on_entity(&self.ctx, delta_header, &entity)
+                            .await?;
+                    }
+                }
+                DeltaHeader::LEAVE => {
+                    let entity = self.ctx.entities.handle_leave(entity_index);
+                    if let Some(entity) = entity {
+                        self.visitor
+                            .on_entity(&self.ctx, delta_header, &entity)
+                            .await?;
+                    }
+                }
+                DeltaHeader::UPDATE => {
+                    self.ctx.entities.handle_update(
+                        entity_index,
+                        &mut self.field_decode_ctx,
+                        &mut br,
+                    )?;
+                    let Some(entity) = self.ctx.entities.get(&entity_index) else {
+                        continue;
+                    };
+                    self.visitor
+                        .on_entity(&self.ctx, delta_header, entity)
+                        .await?;
+                }
+                _ => {}
+            }
+        }
+
+        br.is_overflowed()?;
+        Ok(())
+    }
+
+    fn handle_cmd_string_tables(&mut self, cmd: &CDemoStringTables) -> anyhow::Result<()> {
+        self.ctx.string_tables.do_full_update(cmd);
+
+        let Some(entity_classes) = self.ctx.entity_classes.as_ref() else {
+            bail!("entity classes are not available")
+        };
+        if let Some(string_table) = self
+            .ctx
+            .string_tables
+            .find_table(INSTANCE_BASELINE_TABLE_NAME)
+        {
+            self.ctx
+                .instance_baseline
+                .update(string_table, entity_classes.classes)?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_cmd_full_packet(&mut self, cmd: CDemoFullPacket) -> anyhow::Result<()> {
+        if let Some(string_table) = cmd.string_table.as_ref() {
+            self.handle_cmd_string_tables(string_table)?;
+        }
+
+        if let Some(packet) = cmd.packet {
+            self.handle_cmd_packet(packet).await?;
+        }
+
+        Ok(())
+    }
+
+    pub fn demo_stream(&self) -> &D {
+        &self.demo_stream
+    }
+
+    pub fn demo_stream_mut(&mut self) -> &mut D {
+        &mut self.demo_stream
+    }
+
+    pub fn context(&self) -> &Context {
+        &self.ctx
     }
 }

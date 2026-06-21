@@ -193,6 +193,17 @@ impl FlattenedSerializerField {
             .as_ref()
             .is_some_and(super::fieldmetadata::FieldSpecialDescriptor::is_dynamic_array)
     }
+
+    /// Returns true if this field is a Pointer type (like `CBodyComponent`).
+    /// Pointer fields represent embedded components whose child fields should be
+    /// recursively extracted during schema discovery.
+    #[must_use]
+    pub fn is_pointer(&self) -> bool {
+        self.metadata
+            .special_descriptor
+            .as_ref()
+            .is_some_and(super::fieldmetadata::FieldSpecialDescriptor::is_pointer)
+    }
 }
 
 /// note about missing `serializer_version` field (from

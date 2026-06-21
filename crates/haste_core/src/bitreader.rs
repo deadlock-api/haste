@@ -77,6 +77,16 @@ impl<'a> BitReader<'a> {
         self.inner.is_overflowed()
     }
 
+    pub fn skip_bits(&mut self, num_bits: usize) -> Result<(), BitError> {
+        self.inner.seek_relative(num_bits as isize)?;
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn num_bits_read(&self) -> usize {
+        self.inner.num_bits_read()
+    }
+
     /// delegated from [`dungers::bitbuf::BitReader`].
     pub fn read_uvarint32(&mut self) -> Result<u32, BitError> {
         self.inner.read_uvarint32()

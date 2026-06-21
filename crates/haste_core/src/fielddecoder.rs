@@ -69,6 +69,14 @@ pub(crate) trait FieldDecode: DynClone + Debug + Send + Sync {
         ctx: &mut FieldDecodeContext,
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError>;
+
+    #[allow(dead_code)]
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        let _ = self.decode(ctx, br)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError>;
 }
 
 dyn_clone::clone_trait_object!(FieldDecode);
@@ -86,12 +94,25 @@ impl FieldDecode for InvalidDecoder {
     ) -> Result<FieldValue, DecoderError> {
         unreachable!()
     }
+
+    #[cold]
+    fn skip_bits(&self, _br: &mut BitReader) -> Result<usize, DecoderError> {
+        unreachable!()
+    }
 }
 
 // ----
 
 trait InternalFieldDecode<T>: DynClone + Debug + Send + Sync {
     fn decode(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<T, BitError>;
+
+    #[allow(dead_code)]
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), BitError> {
+        let _ = self.decode(ctx, br)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError>;
 }
 
 dyn_clone::clone_trait_object!(<T> InternalFieldDecode<T>);
@@ -109,6 +130,12 @@ impl FieldDecode for I64Decoder {
     ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::I64(br.read_varint64()?))
     }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let start = br.num_bits_read();
+        let _ = br.read_varint64()?;
+        Ok(br.num_bits_read() - start)
+    }
 }
 
 // ----
@@ -124,6 +151,12 @@ impl FieldDecode for InternalU64Decoder {
     ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::U64(br.read_uvarint64()?))
     }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let start = br.num_bits_read();
+        let _ = br.read_uvarint64()?;
+        Ok(br.num_bits_read() - start)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -138,6 +171,11 @@ impl FieldDecode for InternalU64Fixed64Decoder {
         let mut buf = [0u8; 8];
         br.read_bytes(&mut buf)?;
         Ok(FieldValue::U64(u64::from_le_bytes(buf)))
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        br.skip_bits(64)?;
+        Ok(64)
     }
 }
 
@@ -176,6 +214,14 @@ impl FieldDecode for U64Decoder {
     ) -> Result<FieldValue, DecoderError> {
         self.decoder.decode(ctx, br)
     }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        self.decoder.skip_bits(br)
+    }
 }
 
 // ----
@@ -190,6 +236,11 @@ impl FieldDecode for BoolDecoder {
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::Bool(br.read_bool()?))
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        br.skip_bits(1)?;
+        Ok(1)
     }
 }
 
@@ -211,6 +262,27 @@ impl FieldDecode for StringDecoder {
         ctx.string_buf.clear();
         Ok(ret)
     }
+
+    fn skip(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        loop {
+            let val = br.read_byte()?;
+            if val == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let start = br.num_bits_read();
+        loop {
+            let val = br.read_byte()?;
+            if val == 0 {
+                break;
+            }
+        }
+        Ok(br.num_bits_read() - start)
+    }
 }
 
 // ----
@@ -222,6 +294,12 @@ impl InternalFieldDecode<f32> for InternalF32SimulationTimeDecoder {
     fn decode(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<f32, BitError> {
         Ok(br.read_uvarint32()? as f32 * ctx.tick_interval)
     }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError> {
+        let start = br.num_bits_read();
+        let _ = br.read_uvarint32()?;
+        Ok(br.num_bits_read() - start)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -230,6 +308,12 @@ struct InternalF32CoordDecoder;
 impl InternalFieldDecode<f32> for InternalF32CoordDecoder {
     fn decode(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<f32, BitError> {
         br.read_bitcoord()
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError> {
+        let start = br.num_bits_read();
+        let _ = br.read_bitcoord()?;
+        Ok(br.num_bits_read() - start)
     }
 }
 
@@ -240,6 +324,11 @@ impl InternalFieldDecode<f32> for InternalF32NormalDecoder {
     fn decode(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<f32, BitError> {
         br.read_bitnormal()
     }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError> {
+        br.skip_bits(12)?;
+        Ok(12)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -248,6 +337,11 @@ struct InternalF32NoScaleDecoder;
 impl InternalFieldDecode<f32> for InternalF32NoScaleDecoder {
     fn decode(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<f32, BitError> {
         br.read_bitfloat()
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError> {
+        br.skip_bits(32)?;
+        Ok(32)
     }
 }
 
@@ -272,6 +366,14 @@ impl InternalQuantizedFloatDecoder {
 impl InternalFieldDecode<f32> for InternalQuantizedFloatDecoder {
     fn decode(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<f32, BitError> {
         self.quantized_float.decode(br)
+    }
+
+    fn skip(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), BitError> {
+        self.quantized_float.skip(br)
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError> {
+        self.quantized_float.skip_bits(br)
     }
 }
 
@@ -328,6 +430,14 @@ impl InternalFieldDecode<f32> for InternalF32Decoder {
     fn decode(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<f32, BitError> {
         self.decoder.decode(ctx, br)
     }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), BitError> {
+        self.decoder.skip(ctx, br)
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, BitError> {
+        self.decoder.skip_bits(br)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -351,6 +461,15 @@ impl FieldDecode for F32Decoder {
     ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::F32(self.decoder.decode(ctx, br)?))
     }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        Ok(self.decoder.skip_bits(br)?)
+    }
 }
 
 // ----
@@ -373,6 +492,21 @@ impl FieldDecode for InternalVector3DefaultDecoder {
         ];
         Ok(FieldValue::Vector3(vec3))
     }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)?;
+        self.decoder.skip(ctx, br)?;
+        self.decoder.skip(ctx, br)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let mut total = 0;
+        total += self.decoder.skip_bits(br)?;
+        total += self.decoder.skip_bits(br)?;
+        total += self.decoder.skip_bits(br)?;
+        Ok(total)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -385,6 +519,12 @@ impl FieldDecode for InternalVector3NormalDecoder {
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::Vector3(br.read_bitvec3normal()?))
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let start = br.num_bits_read();
+        let _ = br.read_bitvec3normal()?;
+        Ok(br.num_bits_read() - start)
     }
 }
 
@@ -417,6 +557,14 @@ impl FieldDecode for Vector3Decoder {
     ) -> Result<FieldValue, DecoderError> {
         self.decoder.decode(ctx, br)
     }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        self.decoder.skip_bits(br)
+    }
 }
 
 // ----
@@ -442,6 +590,19 @@ impl FieldDecode for Vector2Decoder {
     ) -> Result<FieldValue, DecoderError> {
         let vec2 = [self.decoder.decode(ctx, br)?, self.decoder.decode(ctx, br)?];
         Ok(FieldValue::Vector2(vec2))
+    }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)?;
+        self.decoder.skip(ctx, br)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let mut total = 0;
+        total += self.decoder.skip_bits(br)?;
+        total += self.decoder.skip_bits(br)?;
+        Ok(total)
     }
 }
 
@@ -474,6 +635,23 @@ impl FieldDecode for Vector4Decoder {
         ];
         Ok(FieldValue::Vector4(vec4))
     }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)?;
+        self.decoder.skip(ctx, br)?;
+        self.decoder.skip(ctx, br)?;
+        self.decoder.skip(ctx, br)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let mut total = 0;
+        total += self.decoder.skip_bits(br)?;
+        total += self.decoder.skip_bits(br)?;
+        total += self.decoder.skip_bits(br)?;
+        total += self.decoder.skip_bits(br)?;
+        Ok(total)
+    }
 }
 
 // ----
@@ -496,6 +674,18 @@ impl FieldDecode for InternalQAnglePitchYawDecoder {
         ];
         Ok(FieldValue::QAngle(vec3))
     }
+
+    fn skip(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        let _ = br.read_ubit64(self.bit_count)?;
+        let _ = br.read_ubit64(self.bit_count)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let bits = self.bit_count * 2;
+        br.skip_bits(bits)?;
+        Ok(bits)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -508,6 +698,17 @@ impl FieldDecode for InternalQAngleNoBitCountDecoder {
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError> {
         Ok(FieldValue::QAngle(br.read_bitvec3coord()?))
+    }
+
+    fn skip(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        let _ = br.read_bitvec3coord()?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let start = br.num_bits_read();
+        let _ = br.read_bitvec3coord()?;
+        Ok(br.num_bits_read() - start)
     }
 }
 
@@ -538,6 +739,34 @@ impl FieldDecode for InternalQAnglePreciseDecoder {
 
         Ok(FieldValue::QAngle(vec3))
     }
+
+    fn skip(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        let rx = br.read_bool()?;
+        let ry = br.read_bool()?;
+        let rz = br.read_bool()?;
+
+        if rx {
+            let _ = br.read_ubit64(20)?;
+        }
+        if ry {
+            let _ = br.read_ubit64(20)?;
+        }
+        if rz {
+            let _ = br.read_ubit64(20)?;
+        }
+
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let rx = br.read_bool()?;
+        let ry = br.read_bool()?;
+        let rz = br.read_bool()?;
+
+        let value_bits = 20 * (usize::from(rx) + usize::from(ry) + usize::from(rz));
+        br.skip_bits(value_bits)?;
+        Ok(3 + value_bits)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -557,6 +786,19 @@ impl FieldDecode for InternalQAngleBitCountDecoder {
             br.read_bitangle(self.bit_count)?,
         ];
         Ok(FieldValue::QAngle(vec3))
+    }
+
+    fn skip(&self, _ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        let _ = br.read_ubit64(self.bit_count)?;
+        let _ = br.read_ubit64(self.bit_count)?;
+        let _ = br.read_ubit64(self.bit_count)?;
+        Ok(())
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        let bits = self.bit_count * 3;
+        br.skip_bits(bits)?;
+        Ok(bits)
     }
 }
 
@@ -610,5 +852,13 @@ impl FieldDecode for QAngleDecoder {
         br: &mut BitReader,
     ) -> Result<FieldValue, DecoderError> {
         self.decoder.decode(ctx, br)
+    }
+
+    fn skip(&self, ctx: &mut FieldDecodeContext, br: &mut BitReader) -> Result<(), DecoderError> {
+        self.decoder.skip(ctx, br)
+    }
+
+    fn skip_bits(&self, br: &mut BitReader) -> Result<usize, DecoderError> {
+        self.decoder.skip_bits(br)
     }
 }

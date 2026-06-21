@@ -75,6 +75,10 @@ impl FieldSpecialDescriptor {
             Self::DynamicArray { .. } | Self::DynamicSerializerArray
         )
     }
+
+    pub(crate) fn is_pointer(&self) -> bool {
+        matches!(self, Self::Pointer)
+    }
 }
 
 #[derive(Debug, Clone)]
