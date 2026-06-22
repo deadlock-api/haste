@@ -194,6 +194,17 @@ impl FlattenedSerializerField {
             .is_some_and(super::fieldmetadata::FieldSpecialDescriptor::is_dynamic_array)
     }
 
+    /// Returns true if this field is a fixed-size array (e.g. `int32[6]`). Its element fields are
+    /// identical clones sharing this field's `var_name`, so element keys are distinguished by
+    /// index rather than by name (see `Entity::parse`).
+    #[must_use]
+    pub fn is_fixed_array(&self) -> bool {
+        self.metadata
+            .special_descriptor
+            .as_ref()
+            .is_some_and(super::fieldmetadata::FieldSpecialDescriptor::is_fixed_array)
+    }
+
     /// Returns true if this field is a Pointer type (like `CBodyComponent`).
     /// Pointer fields represent embedded components whose child fields should be
     /// recursively extracted during schema discovery.

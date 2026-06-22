@@ -76,6 +76,10 @@ impl FieldSpecialDescriptor {
         )
     }
 
+    pub(crate) fn is_fixed_array(&self) -> bool {
+        matches!(self, Self::FixedArray { .. })
+    }
+
     pub(crate) fn is_pointer(&self) -> bool {
         matches!(self, Self::Pointer)
     }

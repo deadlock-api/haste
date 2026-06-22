@@ -697,7 +697,47 @@ fn build_fieldop_hierarchy() -> Node<FieldOp> {
     bh.pop().unwrap()
 }
 
-static FIELDOP_HIERARCHY: LazyLock<Node<FieldOp>> = LazyLock::new(|| build_fieldop_hierarchy());
+/// A branch child in the flattened huffman tree: either a terminal op, or the
+/// index of another branch node.
+enum FlatChild {
+    Leaf(FieldOp),
+    Branch(u32),
+}
+
+/// One internal node of the flattened huffman tree. Branch children are embedded
+/// inline, so walking the tree is a single contiguous-array load per bit with no
+/// pointer chasing — the whole tree (~40 nodes) fits in L1.
+struct FlatBranch {
+    left: FlatChild,
+    right: FlatChild,
+}
+
+struct FlatTree {
+    nodes: Vec<FlatBranch>,
+    root: u32,
+}
+
+fn flatten_child(node: &Node<FieldOp>, out: &mut Vec<FlatBranch>) -> FlatChild {
+    match node {
+        Node::Leaf { value, .. } => FlatChild::Leaf(*value),
+        Node::Branch { .. } => FlatChild::Branch(flatten_branch(node, out)),
+    }
+}
+
+fn flatten_branch(node: &Node<FieldOp>, out: &mut Vec<FlatBranch>) -> u32 {
+    let left = flatten_child(node.unwrap_left_branch(), out);
+    let right = flatten_child(node.unwrap_right_branch(), out);
+    let idx = out.len() as u32;
+    out.push(FlatBranch { left, right });
+    idx
+}
+
+static FIELDOP_TREE: LazyLock<FlatTree> = LazyLock::new(|| {
+    let hierarchy = build_fieldop_hierarchy();
+    let mut nodes = Vec::new();
+    let root = flatten_branch(&hierarchy, &mut nodes);
+    FlatTree { nodes, root }
+});
 
 pub(crate) fn read_field_paths(
     br: &mut BitReader,
@@ -705,48 +745,48 @@ pub(crate) fn read_field_paths(
 ) -> Result<usize, BitError> {
     // NOTE: majority of field path reads are shorter then 32 (but some are beyond thousand).
 
-    // it is more efficient to walk huffman tree, then to do static lookups by first accumulating
-    // all the bits (like butterfly does [1]), because hierarchical structure allows making
-    // decisions based on variable values which results in reduction of branch misses of otherwise
-    // quite large (40 branches) match.
+    // Walking the huffman tree beats accumulating all the bits and doing a static lookup (like
+    // butterfly does [1]): the hierarchical structure makes decisions on variable values, cutting
+    // branch misses of the otherwise ~40-arm match.
     //
-    // accumulative lookups vs tree walking (the winner):
-    // - ~14% branch miss reduction
-    // - ~8% execution time reduction
-    //
-    // ^ representing improvements in percentages because milliseconds are meaningless because
-    // replay sized / durations are different; perecentage improvement is consistent across
-    // different replay sizes.
+    // The tree is flattened into a contiguous array (`FlatTree`) with leaf children embedded in
+    // their parent branch, so each bit costs a single array load instead of chasing a boxed-node
+    // pointer — far friendlier to the cache than the original `Box<Node>` hierarchy.
     //
     // [1] https://github.com/ButterflyStats/butterfly/blob/339e91a882cadc1a8f72446616f7d7f1480c3791/src/butterfly/private/entity.cpp#L93
+
+    let tree = &*FIELDOP_TREE;
+    let nodes = tree.nodes.as_slice();
+    let root = tree.root as usize;
 
     let mut fp = FieldPath::default();
     let mut i: usize = 0;
 
-    let mut root: &Node<FieldOp> = &FIELDOP_HIERARCHY;
+    let mut node = &nodes[root];
 
     loop {
-        let next = if br.read_bool()? {
-            root.unwrap_right_branch()
+        let child = if br.read_bool()? {
+            &node.right
         } else {
-            root.unwrap_left_branch()
+            &node.left
         };
 
-        root = if let Node::Leaf { value: op, .. } = next {
-            // NOTE: this is not any worse then a method call (on a struct for example), right?
-            // because what vtables contain? they contain pointers.
-            (op)(&mut fp, br)?;
-            if fp.finished {
-                return Ok(i);
+        match child {
+            FlatChild::Leaf(op) => {
+                (op)(&mut fp, br)?;
+                if fp.finished {
+                    return Ok(i);
+                }
+                fps[i] = fp.clone();
+
+                i += 1;
+                assert!(i <= fps.len());
+
+                node = &nodes[root];
             }
-            fps[i] = fp.clone();
-
-            i += 1;
-            assert!(i <= fps.len());
-
-            &FIELDOP_HIERARCHY
-        } else {
-            next
-        };
+            FlatChild::Branch(idx) => {
+                node = &nodes[*idx as usize];
+            }
+        }
     }
 }

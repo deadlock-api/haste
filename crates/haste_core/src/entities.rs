@@ -223,21 +223,23 @@ impl Entity {
         // eprintln!("-- {:?}", self.serializer.serializer_name);
 
         let fp_count = fieldpath::read_field_paths(br, fps)?;
-        for i in 0..fp_count {
-            let fp = fps.get(i).ok_or(EntityParseError::FieldNotFound)?;
-
+        for fp in &fps[..fp_count] {
             // eprint!("{:?} ", &fp.data[..=fp.last]);
 
+            // Field-path components index `data[0..=last]`, always in bounds (`data: [u8; 7]`,
+            // `last < 7`), so they need no `Option` handling; only `get_child` can legitimately
+            // miss.
+            //
             // NOTE: this loop performes much better then the unrolled
             // version of it, probably because a bunch of ifs cause a bunch
             // of branch misses and branch missles are disasterous.
             let mut field = self
                 .serializer
-                .get_child(fp.get(0).ok_or(EntityParseError::FieldNotFound)?)
+                .get_child(fp.data[0] as usize)
                 .ok_or(EntityParseError::FieldNotFound)?;
             // NOTE: field_key construction logic needs to match what `fkey_from_path` does.
             let mut field_key = field.key;
-            for i in 1..=fp.last() {
+            for i in 1..=fp.last {
                 if field.is_dynamic_array() {
                     field = field.get_child(0).ok_or(EntityParseError::FieldNotFound)?;
                     // NOTE: it's sort of weird to hash index, yup. but it simplifies things
@@ -246,16 +248,25 @@ impl Entity {
                     // hash all parts.
                     field_key = fxhash::add_u64_to_hash(
                         field_key,
-                        fxhash::add_u64_to_hash(
-                            0,
-                            fp.get(i).ok_or(EntityParseError::FieldNotFound)? as u64,
-                        ),
+                        fxhash::add_u64_to_hash(0, fp.data[i] as u64),
                     );
                 } else {
+                    // Fixed-size array children are identical clones that all share the array's
+                    // `var_name`, so keying them by name collapses every element onto a single
+                    // slot. Key by index instead (matching the dynamic-array scheme); the
+                    // navigation into the indexed clone is unchanged.
+                    let fixed_array = field.is_fixed_array();
                     field = field
-                        .get_child(fp.get(i).ok_or(EntityParseError::FieldNotFound)?)
+                        .get_child(fp.data[i] as usize)
                         .ok_or(EntityParseError::FieldNotFound)?;
-                    field_key = fxhash::add_u64_to_hash(field_key, field.var_name.hash);
+                    field_key = if fixed_array {
+                        fxhash::add_u64_to_hash(
+                            field_key,
+                            fxhash::add_u64_to_hash(0, fp.data[i] as u64),
+                        )
+                    } else {
+                        fxhash::add_u64_to_hash(field_key, field.var_name.hash)
+                    };
                 }
             }
 
@@ -359,19 +370,19 @@ fn skip_entity_fields(
     fps: &mut [FieldPath],
 ) -> Result<(), EntityParseError> {
     let fp_count = fieldpath::read_field_paths(br, fps)?;
-    for i in 0..fp_count {
-        let fp = fps.get(i).ok_or(EntityParseError::FieldNotFound)?;
-
+    for fp in &fps[..fp_count] {
+        // Field-path components index `data[0..=last]`, always in bounds (`data: [u8; 7]`,
+        // `last < 7`), so they need no `Option` handling; only `get_child` can legitimately miss.
         let mut field = serializer
-            .get_child(fp.get(0).ok_or(EntityParseError::FieldNotFound)?)
+            .get_child(fp.data[0] as usize)
             .ok_or(EntityParseError::FieldNotFound)?;
 
-        for i in 1..=fp.last() {
+        for i in 1..=fp.last {
             if field.is_dynamic_array() {
                 field = field.get_child(0).ok_or(EntityParseError::FieldNotFound)?;
             } else {
                 field = field
-                    .get_child(fp.get(i).ok_or(EntityParseError::FieldNotFound)?)
+                    .get_child(fp.data[i] as usize)
                     .ok_or(EntityParseError::FieldNotFound)?;
             }
         }
@@ -459,8 +470,7 @@ impl EntityContainer {
                     serializer,
                 };
 
-                #[allow(unsafe_code)]
-                let baseline_data = unsafe { instance_baseline.by_id_unchecked(class_id) };
+                let baseline_data = instance_baseline.by_id(class_id);
 
                 let mut baseline_br = BitReader::new(baseline_data);
                 entity.parse(field_decode_ctx, &mut baseline_br, &mut self.field_paths)?;
@@ -526,8 +536,7 @@ impl EntityContainer {
                     serializer,
                 };
 
-                #[allow(unsafe_code)]
-                let baseline_data = unsafe { instance_baseline.by_id_unchecked(class_id) };
+                let baseline_data = instance_baseline.by_id(class_id);
 
                 let mut baseline_br = BitReader::new(baseline_data);
                 entity.parse(field_decode_ctx, &mut baseline_br, &mut self.field_paths)?;

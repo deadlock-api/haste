@@ -34,20 +34,27 @@ impl InstanceBaseline {
         Ok(())
     }
 
+    /// Baseline bytes for `class_id`, or an empty slice if no baseline has been registered for it.
+    ///
+    /// Never reads out of bounds or dereferences a missing entry. A missing baseline yields an
+    /// empty slice, which decodes to an all-default entity — correct when the create delta that
+    /// follows restates every live field (as a full-packet snapshot does). This matters when a
+    /// parse begins at a full packet whose class set was baselined at a different point than a
+    /// from-the-start parse would have cached.
     #[allow(unsafe_code)]
     #[inline]
-    pub(crate) unsafe fn by_id_unchecked(&self, class_id: i32) -> &[u8] {
-        unsafe {
-            &*self
-                .data
-                .get_unchecked(class_id as usize)
-                .as_ref()
-                .unwrap_unchecked()
-                .get()
+    pub(crate) fn by_id(&self, class_id: i32) -> &[u8] {
+        match self.data.get(class_id as usize).and_then(Option::as_ref) {
+            // SAFETY: the cell is only mutated through `update`, which holds `&mut self`; no other
+            // reference can be live while we borrow it here.
+            Some(cell) => unsafe { &*cell.get() },
+            None => &[],
         }
     }
 
     /// clear clears underlying storage, but this has no effect on the allocated capacity.
+    // Only used by the blocking `Parser::reset`, which is not compiled under the `async` feature.
+    #[cfg_attr(feature = "async", allow(dead_code))]
     pub(crate) fn clear(&mut self) {
         self.data.clear();
     }
