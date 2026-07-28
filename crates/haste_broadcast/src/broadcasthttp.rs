@@ -47,12 +47,6 @@ use crate::httpclient::HttpClient;
 
 const MAX_DELTAFRAME_RETRIES: u32 = 5;
 
-// Valve's relay can answer a fresh `/sync` or `/start` with a transient 4xx/5xx (seen as a bogus
-// 405) right after a broadcast starts, before the edge node has fully warmed up. Retry a few times
-// instead of failing the whole live query on what is usually a startup race, not a real error.
-const MAX_STARTUP_RETRIES: u32 = 5;
-const STARTUP_RETRY_DELAY: Duration = Duration::from_secs(1);
-
 // from wiresharking deadlock:
 //   GET /tv/18895867/sync HTTP/1.1\r\n
 //   user-agent: Valve/Steam HTTP Client 1.0 (1422450)\r\n
@@ -167,31 +161,12 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
         }
     }
 
-    /// Like [`Self::get`], but retries on a client/server error status instead of forwarding it
-    /// straight to the caller, since those are usually the relay not being warmed up yet.
-    async fn get_retrying(
-        &self,
-        url: &str,
-    ) -> Result<http::Response<Result<Bytes, C::Error>>, BroadcastHttpClientError<C::Error>> {
-        let mut attempt = 0;
-        loop {
-            match self.get(url).await {
-                Ok(response) => return Ok(response),
-                Err(BroadcastHttpClientError::StatusCode(_)) if attempt < MAX_STARTUP_RETRIES => {
-                    attempt += 1;
-                    tokio::time::sleep(STARTUP_RETRY_DELAY).await;
-                }
-                Err(err) => return Err(err),
-            }
-        }
-    }
-
     // `SendGet( request, new CSyncRequest( m_SyncParams, nResync ) )`
     // call within the
     // `void CDemoStreamHttp::SendSync( int nResync )`
     async fn get_sync(&self) -> Result<SyncResponse, BroadcastHttpClientError<C::Error>> {
         let url = format!("{}/sync", &self.base_url);
-        serde_json::from_slice(&self.get_retrying(&url).await?.into_body()?)
+        serde_json::from_slice(&self.get(&url).await?.into_body()?)
             .map_err(BroadcastHttpClientError::JsonError)
     }
 
@@ -204,7 +179,7 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
     ) -> Result<Bytes, BroadcastHttpClientError<C::Error>> {
         assert!(signup_fragment >= 0);
         let url = format!("{}/{}/start", &self.base_url, signup_fragment);
-        Ok(self.get_retrying(&url).await?.into_body()?)
+        Ok(self.get(&url).await?.into_body()?)
     }
 
     // void CDemoStreamHttp::RequestFragment( int nFragment, FragmentTypeEnum_t nType )
