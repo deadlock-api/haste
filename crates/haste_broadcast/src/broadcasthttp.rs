@@ -47,6 +47,13 @@ use crate::httpclient::HttpClient;
 
 const MAX_DELTAFRAME_RETRIES: u32 = 5;
 
+// Valve's relay intermittently answers with 5xx or drops the connection mid-match. The fragment
+// being fetched is still valid afterwards, so retrying the same url resumes the stream exactly
+// where it left off, without a resync (and the /full snapshot replay that would come with it).
+const MAX_TRANSIENT_RETRIES: u32 = 10;
+const TRANSIENT_RETRY_INITIAL_DELAY: Duration = Duration::from_millis(500);
+const TRANSIENT_RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
+
 // from wiresharking deadlock:
 //   GET /tv/18895867/sync HTTP/1.1\r\n
 //   user-agent: Valve/Steam HTTP Client 1.0 (1422450)\r\n
@@ -129,6 +136,18 @@ pub enum BroadcastHttpClientError<HttpClientError: Error + Send + Sync + 'static
     JsonError(#[source] serde_json::Error),
 }
 
+impl<HttpClientError: Error + Send + Sync + 'static> BroadcastHttpClientError<HttpClientError> {
+    /// Whether the request is worth repeating: the relay answered with a server error, or the
+    /// connection failed before a complete response was received.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::StatusCode(status) => status.is_server_error(),
+            Self::HttpClientError(_) => true,
+            Self::BuildRequestError(_) | Self::JsonError(_) => false,
+        }
+    }
+}
+
 struct BroadcasHttpClient<'client, C: HttpClient + 'client> {
     http_client: C,
     base_url: String,
@@ -144,10 +163,7 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
         }
     }
 
-    async fn get(
-        &self,
-        url: &str,
-    ) -> Result<http::Response<Result<Bytes, C::Error>>, BroadcastHttpClientError<C::Error>> {
+    async fn get_once(&self, url: &str) -> Result<Bytes, BroadcastHttpClientError<C::Error>> {
         let request = http::Request::builder()
             .method(http::Method::GET)
             .uri(url)
@@ -157,7 +173,29 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
         if response.status().is_client_error() || response.status().is_server_error() {
             Err(BroadcastHttpClientError::StatusCode(response.status()))
         } else {
-            Ok(response)
+            Ok(response.into_body()?)
+        }
+    }
+
+    /// Fetches `url`, retrying transient failures (see
+    /// [`BroadcastHttpClientError::is_transient`]) with exponential backoff. 4xx responses are
+    /// returned immediately: 404 in particular is how the relay signals that a fragment does not
+    /// (yet or anymore) exist and is handled by the caller.
+    async fn get(&self, url: &str) -> Result<Bytes, BroadcastHttpClientError<C::Error>> {
+        let mut delay = TRANSIENT_RETRY_INITIAL_DELAY;
+        let mut attempt = 0;
+        loop {
+            match self.get_once(url).await {
+                Err(err) if err.is_transient() && attempt < MAX_TRANSIENT_RETRIES => {
+                    attempt += 1;
+                    log::warn!(
+                        "transient error fetching {url} (attempt {attempt}/{MAX_TRANSIENT_RETRIES}), retrying in {delay:?}: {err}"
+                    );
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(TRANSIENT_RETRY_MAX_DELAY);
+                }
+                result => return result,
+            }
         }
     }
 
@@ -166,8 +204,7 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
     // `void CDemoStreamHttp::SendSync( int nResync )`
     async fn get_sync(&self) -> Result<SyncResponse, BroadcastHttpClientError<C::Error>> {
         let url = format!("{}/sync", &self.base_url);
-        serde_json::from_slice(&self.get(&url).await?.into_body()?)
-            .map_err(BroadcastHttpClientError::JsonError)
+        serde_json::from_slice(&self.get(&url).await?).map_err(BroadcastHttpClientError::JsonError)
     }
 
     // `SendGet( CFmtStr( "/%d/start", m_SyncResponse.nSignupFragment ), new CStartRequest( ) )`
@@ -179,7 +216,7 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
     ) -> Result<Bytes, BroadcastHttpClientError<C::Error>> {
         assert!(signup_fragment >= 0);
         let url = format!("{}/{}/start", &self.base_url, signup_fragment);
-        Ok(self.get(&url).await?.into_body()?)
+        self.get(&url).await
     }
 
     // void CDemoStreamHttp::RequestFragment( int nFragment, FragmentTypeEnum_t nType )
@@ -193,7 +230,7 @@ impl<'client, C: HttpClient + 'client> BroadcasHttpClient<'client, C> {
             FragmentType::Full => "full",
         };
         let url = format!("{}/{}/{}", self.base_url, fragment, path);
-        Ok(self.get(&url).await?.into_body()?)
+        self.get(&url).await
     }
 }
 
@@ -587,5 +624,104 @@ impl<'client, C: HttpClient + 'client> SeekableDemoStream for BroadcastHttp<'cli
                 Ok(self.total_ticks.unwrap())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::future::Future;
+    use core::sync::atomic::{AtomicU32, Ordering};
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    use super::*;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("mock transport error")]
+    struct MockError;
+
+    /// Answers requests in order with the queued statuses; `Err` simulates a transport failure.
+    struct MockClient {
+        responses: Mutex<VecDeque<Result<http::StatusCode, MockError>>>,
+        calls: AtomicU32,
+    }
+
+    impl MockClient {
+        fn new(responses: impl IntoIterator<Item = Result<http::StatusCode, MockError>>) -> Self {
+            Self {
+                responses: Mutex::new(responses.into_iter().collect()),
+                calls: AtomicU32::new(0),
+            }
+        }
+    }
+
+    impl HttpClient for &MockClient {
+        type Error = MockError;
+
+        fn execute(
+            &self,
+            _request: http::Request<Bytes>,
+        ) -> impl Future<Output = Result<http::Response<Result<Bytes, Self::Error>>, Self::Error>>
+        {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let result = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("more requests than queued responses")
+                .map(|status| {
+                    http::Response::builder()
+                        .status(status)
+                        .body(Ok(Bytes::from_static(b"ok")))
+                        .unwrap()
+                });
+            core::future::ready(result)
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn get_retries_transient_errors_on_the_same_url() {
+        let mock = MockClient::new([
+            Ok(http::StatusCode::BAD_GATEWAY),
+            Err(MockError),
+            Ok(http::StatusCode::OK),
+        ]);
+        let client = BroadcasHttpClient::new(&mock, "http://relay");
+
+        let body = client.get("http://relay/1/delta").await.unwrap();
+
+        assert_eq!(body.as_ref(), b"ok");
+        assert_eq!(mock.calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn get_does_not_retry_client_errors() {
+        let mock = MockClient::new([Ok(http::StatusCode::NOT_FOUND)]);
+        let client = BroadcasHttpClient::new(&mock, "http://relay");
+
+        let err = client.get("http://relay/1/delta").await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            BroadcastHttpClientError::StatusCode(http::StatusCode::NOT_FOUND)
+        ));
+        assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn get_gives_up_after_max_transient_retries() {
+        let mock = MockClient::new(
+            (0..=MAX_TRANSIENT_RETRIES).map(|_| Ok(http::StatusCode::SERVICE_UNAVAILABLE)),
+        );
+        let client = BroadcasHttpClient::new(&mock, "http://relay");
+
+        let err = client.get("http://relay/sync").await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            BroadcastHttpClientError::StatusCode(http::StatusCode::SERVICE_UNAVAILABLE)
+        ));
+        assert_eq!(mock.calls.load(Ordering::SeqCst), MAX_TRANSIENT_RETRIES + 1);
     }
 }
